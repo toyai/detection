@@ -40,8 +40,8 @@ optim = torch.optim.Adam(net.parameters())
 
 
 def train_fn(engine, batch):
-    batch = batch.cuda()
     imgs, targets = batch
+    imgs, targets = imgs.cuda(), targets
     yolo_outputs, loss = net(imgs, targets)
     s_loss = loss.detach().cpu().item()
     optim.zero_grad(True)

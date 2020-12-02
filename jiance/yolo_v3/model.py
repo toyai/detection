@@ -165,10 +165,10 @@ class YOLOLayer(nn.Module):
         # conf_t = torch.rand_like(pred_conf)
         # cls_t = torch.rand_like(pred_cls)
 
-        cxcy_t = torch.zeros_like(cxcy)
-        wh_t = torch.zeros_like(wh)
-        conf_t = torch.zeros_like(pred_conf)
-        cls_t = torch.zeros_like(pred_cls)
+        cxcy_t = torch.zeros_like(cxcy, device=cxcy.device)
+        wh_t = torch.zeros_like(wh, device=wh.device)
+        conf_t = torch.zeros_like(pred_conf, device=pred_conf.device)
+        cls_t = torch.zeros_like(pred_cls, device=pred_cls.device)
         obj_mask = torch.zeros(cxcy[..., 0].shape).long()
 
         for batch_idx, target in enumerate(targets):

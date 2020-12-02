@@ -36,7 +36,7 @@ install_requires = [
     "albumentations",
 ]
 
-extra["test"] = ["coverage", "parameterized"]
+extra["test"] = ["coverage", "parameterized", "mypy"]
 
 setup(
     name="jiance",
