@@ -22,7 +22,7 @@ transforms = A.Compose(
 )
 
 train_dl = DataLoader(
-    VOCDataset(download=False, transforms=transforms),
+    VOCDataset(download=True, transforms=transforms),
     batch_size=8,
     shuffle=True,
     collate_fn=collate_fn,

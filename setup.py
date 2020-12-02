@@ -30,7 +30,7 @@ extra = {}
 
 install_requires = [
     "torch>=1.7.0",
-    "torchvision",
+    "torchvision>=0.8.1",
     "pytorch-ignite",
     "prettytable",
     "albumentations",
