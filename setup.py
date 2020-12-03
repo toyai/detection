@@ -31,12 +31,12 @@ extra = {}
 install_requires = [
     "torch>=1.7.0",
     "torchvision>=0.8.1",
-    "pytorch-ignite",
-    "prettytable",
-    "albumentations",
+    "pytorch-ignite>=0.5.0",
+    "prettytable>=2.0.0",
+    "albumentations>=0.5.2",
 ]
 
-extra["test"] = ["coverage", "parameterized", "mypy"]
+extra["test"] = ["coverage>=5.3", "parameterized>=0.7.4", "mypy>=0.790"]
 
 setup(
     name="jiance",

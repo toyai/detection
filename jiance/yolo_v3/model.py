@@ -87,6 +87,7 @@ class YOLOLayer(nn.Module):
         self.grid_size = 0
         self.bce_with_logits_loss = nn.BCEWithLogitsLoss()
         self.mse_loss = nn.MSELoss()
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def forward(self, x, targets=None):
         if x.size(2) != x.size(3):
@@ -138,15 +139,15 @@ class YOLOLayer(nn.Module):
         return (pred_bbox, pred_conf, pred_cls), losses, metrics
 
     def get_grid_offsets(self, grid_size):
-        device = "cuda" if torch.cuda.is_available() else "cpu"
         self.grid_size = grid_size
         self.stride = self.img_size / self.grid_size
-        t = torch.arange(grid_size, device=device)
+        t = torch.arange(grid_size, device=self.device)
         y, x = torch.meshgrid(t, t)
         # (1, 1, 13, 13, 2)
         self.grid_xy = torch.stack((x, y), dim=-1).unsqueeze(0).unsqueeze(0)
         self.scaled_anchors = torch.tensor(
-            [(w / self.stride, h / self.stride) for w, h in self.anchors], device=device
+            [(w / self.stride, h / self.stride) for w, h in self.anchors],
+            device=self.device,
         )
         # (1, 3, 1, 1, 2)
         self.grid_wh = self.scaled_anchors.reshape(1, self.num_anchors, 1, 1, 2)
@@ -165,27 +166,27 @@ class YOLOLayer(nn.Module):
         # conf_t = torch.rand_like(pred_conf)
         # cls_t = torch.rand_like(pred_cls)
 
-        cxcy_t = torch.zeros_like(cxcy, device=cxcy.device)
-        wh_t = torch.zeros_like(wh, device=wh.device)
-        conf_t = torch.zeros_like(pred_conf, device=pred_conf.device)
-        cls_t = torch.zeros_like(pred_cls, device=pred_cls.device)
+        cxcy_t = torch.zeros_like(cxcy, device=self.device)
+        wh_t = torch.zeros_like(wh, device=self.device)
+        conf_t = torch.zeros_like(pred_conf, device=self.device)
+        cls_t = torch.zeros_like(pred_cls, device=self.device)
         obj_mask = torch.zeros(cxcy[..., 0].shape).long()
 
         for batch_idx, target in enumerate(targets):
-            target = torch.tensor(target, dtype=cxcy.dtype, device=cxcy.device)
+            target = torch.tensor(target, dtype=cxcy.dtype, device=self.device)
             cxcywh, class_idx = target[:, :-1], target[:, -1]
             cxcywh = torch.div(box_convert(cxcywh, "xyxy", "cxcywh"), self.stride)
 
-            cxcy = cxcywh[:, :2]
+            cxcy_ = cxcywh[:, :2]
             wh = cxcywh[:, 2:]
             ious = torch.stack(
                 [wh_bbox_iou(anchor, wh) for anchor in self.scaled_anchors]
             )
             best_ious, best_n = ious.max(0)
-            H, W = cxcy.long().t()
+            H, W = cxcy_.long().t()
 
             # obj_mask[batch_idx, best_n, H, W] = 1
-            cxcy_t[batch_idx, best_n, H, W, :] = cxcy - cxcy.floor()
+            cxcy_t[batch_idx, best_n, H, W, :] = cxcy_ - cxcy_.floor()
             wh_t[batch_idx, best_n, H, W, :] = torch.log(
                 wh / self.scaled_anchors[best_n] + 1e-16
             )
