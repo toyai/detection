@@ -172,7 +172,7 @@ class YOLOLayer(nn.Module):
         obj_mask = torch.zeros(cxcy[..., 0].shape).long()
 
         for batch_idx, target in enumerate(targets):
-            target = torch.tensor(target, dtype=cxcy.dtype)
+            target = torch.tensor(target, dtype=cxcy.dtype, device=cxcy.device)
             cxcywh, class_idx = target[:, :-1], target[:, -1]
             cxcywh = torch.div(box_convert(cxcywh, "xyxy", "cxcywh"), self.stride)
 

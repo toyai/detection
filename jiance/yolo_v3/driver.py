@@ -38,10 +38,12 @@ val_dl = DataLoader(
 net = YOLOv3("jiance/yolo_v3/cfg/yolov3-voc.cfg").cuda()
 optim = torch.optim.Adam(net.parameters())
 
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
 
 def train_fn(engine, batch):
     imgs, targets = batch
-    imgs, targets = imgs.cuda(), targets
+    imgs, targets = imgs.to(device), targets
     yolo_outputs, loss = net(imgs, targets)
     s_loss = loss.detach().cpu().item()
     optim.zero_grad(True)
