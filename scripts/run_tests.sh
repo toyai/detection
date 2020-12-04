@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -xeu
+set -xu
 
 if [ "${TORCH_UTILS_COLLECT_ENV}" -eq "1" ]; then
     python -m torch.utils.collect_env

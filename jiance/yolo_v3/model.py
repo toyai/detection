@@ -1,7 +1,4 @@
-"""
-YOLO v3 Model
-"""
-
+"""YOLO v3 Model."""
 import torch
 from torch import nn
 from torchvision.ops import box_convert
@@ -10,6 +7,7 @@ from jiance.yolo_v3.utils import parse_cfg, wh_bbox_iou
 
 
 def create_yolo_v3(modules):
+    """Creating YOLOv3 Layers."""
     net_cfg = modules.pop(0)
     output_filters = [int(net_cfg["channels"])]
     module_list = nn.ModuleList()
@@ -78,6 +76,8 @@ def create_yolo_v3(modules):
 
 
 class YOLOLayer(nn.Module):
+    """The YOLO Layer."""
+
     def __init__(self, anchors, num_classes, img_size):
         super().__init__()
         self.anchors = anchors

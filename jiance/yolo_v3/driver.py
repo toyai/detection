@@ -1,3 +1,5 @@
+"""YOLOv3 Driver."""
+
 from multiprocessing import cpu_count
 
 import albumentations as A
@@ -22,7 +24,7 @@ transforms = A.Compose(
 )
 
 train_dl = DataLoader(
-    VOCDataset(download=True, transforms=transforms),
+    VOCDataset(download=False, transforms=transforms),
     batch_size=8,
     shuffle=True,
     collate_fn=collate_fn,
@@ -35,15 +37,16 @@ val_dl = DataLoader(
     collate_fn=collate_fn,
 )
 
-net = YOLOv3("jiance/yolo_v3/cfg/yolov3-voc.cfg").cuda()
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+net = YOLOv3("jiance/yolo_v3/cfg/yolov3-voc.cfg").to(DEVICE)
 optim = torch.optim.Adam(net.parameters())
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def train_fn(engine, batch):
+    """Train function."""
+    net.train()
     imgs, targets = batch
-    imgs, targets = imgs.to(device), targets
+    imgs = imgs.to(DEVICE)
     yolo_outputs, loss = net(imgs, targets)
     s_loss = loss.detach().cpu().item()
     optim.zero_grad(True)
@@ -54,5 +57,5 @@ def train_fn(engine, batch):
     return {"loss": s_loss}
 
 
-engine = Engine(train_fn)
-engine.run(train_dl, max_epochs=5)
+train_engine = Engine(train_fn)
+train_engine.run(train_dl, max_epochs=5)

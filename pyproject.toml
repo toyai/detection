@@ -1,3 +1,6 @@
+# ------------
+# black config
+# ------------
 [tool.black]
 line-length = 88
 target-version = ['py36', 'py37', 'py38']
@@ -22,5 +25,18 @@ exclude = '''
 )
 '''
 
+# ------------
+# isort config
+# ------------
 [tool.isort]
 profile="black"
+
+# -------------
+# pylint config
+# -------------
+[tool.pylint.reports]
+output-format="colorized"
+reports="yes"
+
+[tool.pylint.typecheck]
+generated-members="numpy.*,torch.*,cv2.*,np.*"

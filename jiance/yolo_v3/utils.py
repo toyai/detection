@@ -1,6 +1,4 @@
-"""
-Common utilites to YOLO v3.
-"""
+"""Common utilites to YOLO v3."""
 import torch
 
 

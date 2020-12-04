@@ -6,7 +6,6 @@
   "python.formatting.blackPath": "~/miniconda3/envs/detection/bin/black",
   "python.linting.flake8Path": "~/miniconda3/envs/detection/bin/flake8",
   "python.linting.pylintPath": "~/miniconda3/envs/detection/bin/pylint",
-  "python.sortImports.path": "~/miniconda3/envs/detection/isort",
   "python.testing.unittestArgs": ["-v", "-s", "./tests", "-p", "test_*.py"],
   "python.testing.pytestEnabled": false,
   "python.testing.nosetestsEnabled": false,
