@@ -42,3 +42,5 @@ jobs:
       - run: pip install wheel pip setuptools -U
       - run: pip install ".[test]" --progress-bar off -U -f https://download.pytorch.org/whl/cpu/torch_stable.html
       - run: bash ./scripts/run_tests.sh
+        env:
+          TORCH_UTILS_COLLECT_ENV: 1
