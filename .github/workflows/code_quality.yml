@@ -20,5 +20,6 @@ jobs:
         with:
           python-version: 3.6
 
-      - run: pip install wheel pip -U
+      - run: pip install wheel pip setuptools -U
+      - run: pip install ".[test]" --progress-bar off -U
       - run: bash ./scripts/run_code_quality.sh
