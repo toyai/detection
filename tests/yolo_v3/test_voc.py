@@ -13,7 +13,7 @@ from jiance.yolo_v3.voc import VOCDataset, collate_fn
 
 class TestVOCDataset(unittest.TestCase):
     def test_voc_dataset_without_transforms(self):
-        ds = VOCDataset(download=True)
+        ds = VOCDataset(download=False)
         img, target = next(iter(ds))
         self.assertIsInstance(img, np.ndarray)
         self.assertIsInstance(target, list)
@@ -26,7 +26,7 @@ class TestVOCDataset(unittest.TestCase):
             [A.Resize(img_size, img_size)],
             bbox_params=A.BboxParams(format="pascal_voc"),
         )
-        ds = VOCDataset(download=True, transforms=transforms)
+        ds = VOCDataset(download=False, transforms=transforms)
         img, targets = next(iter(ds))
         self.assertEqual(img.shape, (img_size, img_size, 3))
         self.assertTrue(
@@ -38,7 +38,7 @@ class TestVOCDataset(unittest.TestCase):
 
     def test_voc_dataloader(self):
         bs = 2
-        ds = VOCDataset(download=True)
+        ds = VOCDataset(download=False)
         dl = DataLoader(ds, batch_size=bs, collate_fn=collate_fn)
         imgs, targets = next(iter(dl))
         self.assertIsInstance(imgs, Tensor)
@@ -48,4 +48,5 @@ class TestVOCDataset(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    VOCDataset(download=True)
     unittest.main()
