@@ -37,7 +37,7 @@ install_requires = [
 ]
 
 extra["testing"] = ["coverage>=5.3", "parameterized>=0.7.4"]
-extra["quality"] = ["pylint", "isort[colors]", "black", "mypy"]
+extra["quality"] = ["pylint", "isort[colors]", "black", "mypy", "flake8"]
 
 extra["dev"] = extra["testing"] + extra["quality"]
 

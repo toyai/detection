@@ -1,6 +1,9 @@
 name: ci_code_quality
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [dev]
+  pull_request:
 
 jobs:
   code_quality:
