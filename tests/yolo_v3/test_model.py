@@ -1,6 +1,6 @@
 """Unitteting everything in yolo_v3/model.py."""
 
-import unittest
+from unittest import TestCase, main
 
 import torch
 
@@ -21,7 +21,7 @@ ANCHORS = (
 )
 
 
-class TestYOLO(unittest.TestCase):
+class TestYOLO(TestCase):
     def setUp(self):
         self.batch_size = 1
         self.in_channels = 3
@@ -37,16 +37,14 @@ class TestYOLO(unittest.TestCase):
     def test_backbone(self):
         net = BackBone()
         out_52, out_26, out_13 = net(self.x)
-        self.assertEqual(out_13.size(), torch.Size([self.batch_size, 1024, 13, 13]))
-        self.assertEqual(out_26.size(), torch.Size([self.batch_size, 512, 26, 26]))
-        self.assertEqual(out_52.size(), torch.Size([self.batch_size, 256, 52, 52]))
+        self.assertEqual(out_13.shape, (self.batch_size, 1024, 13, 13))
+        self.assertEqual(out_26.shape, (self.batch_size, 512, 26, 26))
+        self.assertEqual(out_52.shape, (self.batch_size, 256, 52, 52))
 
     def test_conv_bn(self):
         net = ConvBN(self.in_channels, 4, kernel_size=3)
         out = net(self.x)
-        self.assertEqual(
-            out.size(), torch.Size([self.batch_size, 4, self.img_size, self.img_size])
-        )
+        self.assertEqual(out.shape, (self.batch_size, 4, self.img_size, self.img_size))
 
     def test_mid_block(self):
         out_channel = 32
@@ -61,26 +59,22 @@ class TestYOLO(unittest.TestCase):
                 )
                 outs, branch = net(self.x)
                 self.assertEqual(
-                    outs.size(),
-                    torch.Size(
-                        [
-                            self.batch_size,
-                            len(anchors),
-                            self.img_size,
-                            self.img_size,
-                            self.num_classes + 5,
-                        ]
+                    outs.shape,
+                    (
+                        self.batch_size,
+                        len(anchors),
+                        self.img_size,
+                        self.img_size,
+                        self.num_classes + 5,
                     ),
                 )
                 self.assertEqual(
-                    branch.size(),
-                    torch.Size(
-                        [
-                            self.batch_size,
-                            out_channel // 2,
-                            self.img_size,
-                            self.img_size,
-                        ]
+                    branch.shape,
+                    (
+                        self.batch_size,
+                        out_channel // 2,
+                        self.img_size,
+                        self.img_size,
                     ),
                 )
 
@@ -88,39 +82,33 @@ class TestYOLO(unittest.TestCase):
         net = Neck(self.img_size, self.num_classes)
         out1, out2, out3 = net(self.out_52, self.out_26, self.out_13)
         self.assertEqual(
-            out1.size(),
-            torch.Size(
-                [
-                    self.batch_size,
-                    len(ANCHORS[2]),
-                    self.out_13.size(2),
-                    self.out_13.size(3),
-                    self.num_classes + 5,
-                ]
+            out1.shape,
+            (
+                self.batch_size,
+                len(ANCHORS[2]),
+                self.out_13.size(2),
+                self.out_13.size(3),
+                self.num_classes + 5,
             ),
         )
         self.assertEqual(
-            out2.size(),
-            torch.Size(
-                [
-                    self.batch_size,
-                    len(ANCHORS[1]),
-                    self.out_26.size(2),
-                    self.out_26.size(3),
-                    self.num_classes + 5,
-                ]
+            out2.shape,
+            (
+                self.batch_size,
+                len(ANCHORS[1]),
+                self.out_26.size(2),
+                self.out_26.size(3),
+                self.num_classes + 5,
             ),
         )
         self.assertEqual(
-            out3.size(),
-            torch.Size(
-                [
-                    self.batch_size,
-                    len(ANCHORS[0]),
-                    self.out_52.size(2),
-                    self.out_52.size(3),
-                    self.num_classes + 5,
-                ]
+            out3.shape,
+            (
+                self.batch_size,
+                len(ANCHORS[0]),
+                self.out_52.size(2),
+                self.out_52.size(3),
+                self.num_classes + 5,
             ),
         )
 
@@ -128,9 +116,7 @@ class TestYOLO(unittest.TestCase):
         net = ResidualBlock(self.in_channels + 1)
         x = torch.rand(self.batch_size, 4, 4, 4)
         out = net(x)
-        self.assertEqual(
-            out.size(), torch.Size([self.batch_size, self.in_channels + 1, 4, 4])
-        )
+        self.assertEqual(out.shape, (self.batch_size, self.in_channels + 1, 4, 4))
 
     def test_yolo_layer(self):
         for anchors in ANCHORS:
@@ -144,15 +130,13 @@ class TestYOLO(unittest.TestCase):
                 net = YOLOLayer(anchors, self.img_size, self.num_classes)
                 out = net(x)
                 self.assertEqual(
-                    out.size(),
-                    torch.Size(
-                        [
-                            self.batch_size,
-                            len(anchors),
-                            self.img_size,
-                            self.img_size,
-                            self.num_classes + 5,
-                        ]
+                    out.shape,
+                    (
+                        self.batch_size,
+                        len(anchors),
+                        self.img_size,
+                        self.img_size,
+                        self.num_classes + 5,
                     ),
                 )
 
@@ -160,44 +144,38 @@ class TestYOLO(unittest.TestCase):
         net = YOLOv3(self.img_size, self.num_classes)
         out1, out2, out3 = net(self.x)
         self.assertEqual(
-            out1.size(),
-            torch.Size(
-                [
-                    self.batch_size,
-                    len(ANCHORS[2]),
-                    self.out_13.size(2),
-                    self.out_13.size(3),
-                    self.num_classes + 5,
-                ]
+            out1.shape,
+            (
+                self.batch_size,
+                len(ANCHORS[2]),
+                self.out_13.size(2),
+                self.out_13.size(3),
+                self.num_classes + 5,
             ),
         )
         self.assertEqual(
-            out2.size(),
-            torch.Size(
-                [
-                    self.batch_size,
-                    len(ANCHORS[1]),
-                    self.out_26.size(2),
-                    self.out_26.size(3),
-                    self.num_classes + 5,
-                ]
+            out2.shape,
+            (
+                self.batch_size,
+                len(ANCHORS[1]),
+                self.out_26.size(2),
+                self.out_26.size(3),
+                self.num_classes + 5,
             ),
         )
         self.assertEqual(
-            out3.size(),
-            torch.Size(
-                [
-                    self.batch_size,
-                    len(ANCHORS[0]),
-                    self.out_52.size(2),
-                    self.out_52.size(3),
-                    self.num_classes + 5,
-                ]
+            out3.shape,
+            (
+                self.batch_size,
+                len(ANCHORS[0]),
+                self.out_52.size(2),
+                self.out_52.size(3),
+                self.num_classes + 5,
             ),
         )
 
 
-class TestInvalidYOLO(unittest.TestCase):
+class TestInvalidYOLO(TestCase):
     def setUp(self):
         self.batch_size = 1
         self.in_channels = 3
@@ -240,4 +218,4 @@ class TestInvalidYOLO(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    main()

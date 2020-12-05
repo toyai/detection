@@ -7,3 +7,5 @@ if [[ "${TORCH_UTILS_COLLECT_ENV}" -eq 1 ]]; then
 fi
 
 coverage run --source jiance -m unittest discover -v -s ./tests/ -p "test_*.py"
+
+coverage report
