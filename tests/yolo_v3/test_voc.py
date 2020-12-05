@@ -18,8 +18,9 @@ manual_seed(666)
 
 
 def _create_voc_ds(total_images):
-    root = os.path.join(".", "VOCdevkit/VOC2012")
-    shutil.rmtree(root)
+    root = os.path.join(os.getcwd(), "VOCdevkit/VOC2012")
+    if os.path.isdir(root):
+        shutil.rmtree(root)
     annotations = "Annotations"
     jpeg = "JPEGImages"
     img_set = "ImageSets/Main"
@@ -85,7 +86,7 @@ class TestVOCDataset(TestCase):
         img, target = next(iter(ds))
         self.assertIsInstance(img, np.ndarray)
         self.assertIsInstance(target, list)
-        self.assertTrue(os.path.exists("VOCdevkit"))
+        self.assertTrue(os.path.exists(os.path.join(os.getcwd(), "VOCdevkit/VOC2012")))
 
     def test_voc_dataset_with_transforms(self):
         num_classes = 20
@@ -111,6 +112,7 @@ class TestVOCDataset(TestCase):
             self.assertEqual(len(targets), bs)
 
 
+_create_voc_ds(6)
+
 if __name__ == "__main__":
-    _create_voc_ds(6)
     main()

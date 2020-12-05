@@ -53,7 +53,7 @@ class VOCDataset(VOCDetection):
 
     def __init__(
         self,
-        root: str = ".",
+        root: str = os.getcwd(),
         year: str = "2012",
         image_set: str = "train",
         download: bool = False,
