@@ -40,3 +40,6 @@ reports="yes"
 
 [tool.pylint.typecheck]
 generated-members="numpy.*,torch.*,cv2.*,np.*"
+
+[tool.pylint.design]
+max-args=6

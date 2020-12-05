@@ -1,9 +1,10 @@
+"""Unitteting everything in yolo_v3/model.py."""
+
 import unittest
 
 import torch
 
 from jiance.yolo_v3.backbone import (
-    ANCHORS,
     BackBone,
     ConvBN,
     MidBlock,
@@ -11,6 +12,12 @@ from jiance.yolo_v3.backbone import (
     ResidualBlock,
     YOLOLayer,
     YOLOv3,
+)
+
+ANCHORS = (
+    ((10, 13), (16, 30), (33, 23)),
+    ((30, 61), (62, 45), (59, 119)),
+    ((116, 90), (156, 198), (373, 326)),
 )
 
 

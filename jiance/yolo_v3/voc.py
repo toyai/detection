@@ -2,7 +2,7 @@
 
 import os
 import xml.etree.ElementTree as ET
-from typing import Callable, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import cv2
 import matplotlib.pyplot as plt
@@ -62,7 +62,7 @@ class VOCDataset(VOCDetection):
         super().__init__(root, year, image_set, download, transforms)
         self.transforms = transforms
 
-    def __getitem__(self, index: int) -> Tuple[np.array, np.array]:
+    def __getitem__(self, index: int) -> Tuple[np.ndarray, List]:
         img = cv2.imread(self.images[index])
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
@@ -91,14 +91,7 @@ class VOCDataset(VOCDetection):
 def collate_fn(batch):
     imgs, targets = tuple(zip(*batch))
     imgs = [ToTensor()(img) for img in imgs]
-    # max_len = max([len(t) for t in targets])
-    # new_targets = []
-    # for t in targets:
-    #     zeros = np.zeros((max_len - len(t), t.shape[1]))
-    #     new_targets.append(np.concatenate((t, zeros), axis=0))
-
     imgs = torch.stack(imgs, dim=0)
-    # targets = torch.tensor(new_targets, dtype=torch.float32)
 
     return imgs, targets
 
