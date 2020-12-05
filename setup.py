@@ -36,7 +36,11 @@ install_requires = [
     "albumentations>=0.5.2",
 ]
 
-extra["test"] = ["coverage>=5.3", "parameterized>=0.7.4"]
+extra["testing"] = ["coverage>=5.3", "parameterized>=0.7.4"]
+extra["quality"] = ["pylint", "isort[colors]", "black", "mypy"]
+
+extra["dev"] = extra["testing"] + extra["quality"]
+
 
 setup(
     name="jiance",

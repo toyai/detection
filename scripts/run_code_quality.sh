@@ -1,7 +1,5 @@
 #!/bin/bash
 
-pip install pip pylint flake8 "isort[colors]" black mypy --progress-bar off -U
-
 set -xu
 
 black . --check

@@ -1,19 +1,10 @@
 name: ci_code_quality
 
-on:
-  push:
-    branches:
-      - dev
-  pull_request:
-    branches:
-      - dev
+on: [push, pull_request]
 
 jobs:
   code_quality:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash -l {0}
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-python@v2
@@ -21,5 +12,5 @@ jobs:
           python-version: 3.6
 
       - run: pip install wheel pip setuptools -U
-      - run: pip install ".[test]" --progress-bar off -U -f https://download.pytorch.org/whl/cpu/torch_stable.html
+      - run: pip install ".[dev]" --progress-bar off -Uf https://download.pytorch.org/whl/cpu/torch_stable.html
       - run: bash ./scripts/run_code_quality.sh
