@@ -18,7 +18,7 @@ manual_seed(666)
 
 
 def _create_voc_ds(total_images):
-    root = os.path.join(os.getcwd(), "VOCdevkit/VOC2012")
+    root = os.path.join(".", "VOCdevkit/VOC2012")
     shutil.rmtree(root)
     annotations = "Annotations"
     jpeg = "JPEGImages"
