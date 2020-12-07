@@ -3,8 +3,10 @@
 from unittest import TestCase, main
 
 import torch
+from parameterized import parameterized
 
-from jiance.yolo_v3.backbone import (
+from jiance.yolo_v3.model import (
+    ANCHORS,
     BackBone,
     ConvBN,
     MidBlock,
@@ -12,12 +14,6 @@ from jiance.yolo_v3.backbone import (
     ResidualBlock,
     YOLOLayer,
     YOLOv3,
-)
-
-ANCHORS = (
-    ((10, 13), (16, 30), (33, 23)),
-    ((30, 61), (62, 45), (59, 119)),
-    ((116, 90), (156, 198), (373, 326)),
 )
 
 
@@ -59,13 +55,33 @@ class TestYOLO(TestCase):
                 )
                 outs, branch = net(self.x)
                 self.assertEqual(
-                    outs.shape,
+                    outs[0].shape,
                     (
                         self.batch_size,
                         len(anchors),
                         self.img_size,
                         self.img_size,
-                        self.num_classes + 5,
+                        4,
+                    ),
+                )
+                self.assertEqual(
+                    outs[1].shape,
+                    (
+                        self.batch_size,
+                        len(anchors),
+                        self.img_size,
+                        self.img_size,
+                        20,
+                    ),
+                )
+                self.assertEqual(
+                    outs[2].shape,
+                    (
+                        self.batch_size,
+                        len(anchors),
+                        self.img_size,
+                        self.img_size,
+                        1,
                     ),
                 )
                 self.assertEqual(
@@ -81,36 +97,38 @@ class TestYOLO(TestCase):
     def test_neck(self):
         net = Neck(self.img_size, self.num_classes)
         out1, out2, out3 = net(self.out_52, self.out_26, self.out_13)
-        self.assertEqual(
-            out1.shape,
-            (
-                self.batch_size,
-                len(ANCHORS[2]),
-                self.out_13.size(2),
-                self.out_13.size(3),
-                self.num_classes + 5,
-            ),
-        )
-        self.assertEqual(
-            out2.shape,
-            (
-                self.batch_size,
-                len(ANCHORS[1]),
-                self.out_26.size(2),
-                self.out_26.size(3),
-                self.num_classes + 5,
-            ),
-        )
-        self.assertEqual(
-            out3.shape,
-            (
-                self.batch_size,
-                len(ANCHORS[0]),
-                self.out_52.size(2),
-                self.out_52.size(3),
-                self.num_classes + 5,
-            ),
-        )
+        for idx, out in enumerate((out1, out2, out3)):
+            idx = idx + idx if idx > 0 else idx + 1
+            self.assertEqual(
+                out[0].shape,
+                (
+                    self.batch_size,
+                    len(ANCHORS[2]),
+                    self.out_13.size(2) * idx,
+                    self.out_13.size(3) * idx,
+                    4,
+                ),
+            )
+            self.assertEqual(
+                out[1].shape,
+                (
+                    self.batch_size,
+                    len(ANCHORS[1]),
+                    self.out_13.size(2) * idx,
+                    self.out_13.size(3) * idx,
+                    20,
+                ),
+            )
+            self.assertEqual(
+                out[2].shape,
+                (
+                    self.batch_size,
+                    len(ANCHORS[0]),
+                    self.out_13.size(2) * idx,
+                    self.out_13.size(3) * idx,
+                    1,
+                ),
+            )
 
     def test_residual_block(self):
         net = ResidualBlock(self.in_channels + 1)
@@ -128,51 +146,75 @@ class TestYOLO(TestCase):
             )
             with self.subTest(anchors=anchors):
                 net = YOLOLayer(anchors, self.img_size, self.num_classes)
-                out = net(x)
+                pred_bbox, pred_cls, pred_conf = net(x)
                 self.assertEqual(
-                    out.shape,
+                    pred_bbox.shape,
                     (
                         self.batch_size,
                         len(anchors),
                         self.img_size,
                         self.img_size,
-                        self.num_classes + 5,
+                        4,
+                    ),
+                )
+                self.assertEqual(
+                    pred_cls.shape,
+                    (
+                        self.batch_size,
+                        len(anchors),
+                        self.img_size,
+                        self.img_size,
+                        20,
+                    ),
+                )
+                self.assertEqual(
+                    pred_conf.shape,
+                    (
+                        self.batch_size,
+                        len(anchors),
+                        self.img_size,
+                        self.img_size,
+                        1,
                     ),
                 )
 
-    def test_yolo_v3(self):
+    @parameterized.expand([(True,), (False,)])
+    def test_yolo_v3(self, mode):
         net = YOLOv3(self.img_size, self.num_classes)
+        net.train(mode)
         out1, out2, out3 = net(self.x)
-        self.assertEqual(
-            out1.shape,
-            (
-                self.batch_size,
-                len(ANCHORS[2]),
-                self.out_13.size(2),
-                self.out_13.size(3),
-                self.num_classes + 5,
-            ),
-        )
-        self.assertEqual(
-            out2.shape,
-            (
-                self.batch_size,
-                len(ANCHORS[1]),
-                self.out_26.size(2),
-                self.out_26.size(3),
-                self.num_classes + 5,
-            ),
-        )
-        self.assertEqual(
-            out3.shape,
-            (
-                self.batch_size,
-                len(ANCHORS[0]),
-                self.out_52.size(2),
-                self.out_52.size(3),
-                self.num_classes + 5,
-            ),
-        )
+        for idx, out in enumerate((out1, out2, out3)):
+            idx = idx + idx if idx > 0 else idx + 1
+            self.assertEqual(
+                out[0].shape,
+                (
+                    self.batch_size,
+                    len(ANCHORS[2]),
+                    self.out_13.size(2) * idx,
+                    self.out_13.size(3) * idx,
+                    4,
+                ),
+            )
+            self.assertEqual(
+                out[1].shape,
+                (
+                    self.batch_size,
+                    len(ANCHORS[1]),
+                    self.out_13.size(2) * idx,
+                    self.out_13.size(3) * idx,
+                    20,
+                ),
+            )
+            self.assertEqual(
+                out[2].shape,
+                (
+                    self.batch_size,
+                    len(ANCHORS[0]),
+                    self.out_13.size(2) * idx,
+                    self.out_13.size(3) * idx,
+                    1,
+                ),
+            )
 
 
 class TestInvalidYOLO(TestCase):

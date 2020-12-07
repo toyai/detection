@@ -1,6 +1,6 @@
 """YOLOv3 Driver."""
 
-from multiprocessing import cpu_count
+# from multiprocessing import cpu_count
 
 import albumentations as A
 import torch
@@ -9,6 +9,7 @@ from ignite.utils import manual_seed
 from torch.utils.data import DataLoader
 
 from jiance.yolo_v3.model import YOLOv3
+from jiance.yolo_v3.utils import yolo_loss
 from jiance.yolo_v3.voc import VOCDataset, collate_fn
 
 manual_seed(666)
@@ -25,10 +26,10 @@ transforms = A.Compose(
 
 train_dl = DataLoader(
     VOCDataset(download=False, transforms=transforms),
-    batch_size=8,
+    batch_size=2,
     shuffle=True,
     collate_fn=collate_fn,
-    num_workers=cpu_count(),
+    # num_workers=cpu_count(),
 )
 val_dl = DataLoader(
     VOCDataset(download=False, transforms=transforms),
@@ -38,7 +39,8 @@ val_dl = DataLoader(
 )
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-net = YOLOv3("jiance/yolo_v3/cfg/yolov3-voc.cfg").to(DEVICE)
+print(f"TRAINING ON {DEVICE}...")
+net = YOLOv3(416, 20).to(DEVICE)
 optim = torch.optim.Adam(net.parameters())
 
 
@@ -47,10 +49,14 @@ def train_fn(engine, batch):
     net.train()
     imgs, targets = batch
     imgs = imgs.to(DEVICE)
-    yolo_outputs, loss = net(imgs, targets)
-    s_loss = loss.detach().cpu().item()
-    optim.zero_grad(True)
-    loss.backward()
+    out1, out2, out3 = net(imgs)
+    loss_1 = yolo_loss(out1, targets, 416, net.neck.block1.yolo_layer.scaled_anchors)
+    loss_2 = yolo_loss(out2, targets, 416, net.neck.block2.yolo_layer.scaled_anchors)
+    loss_3 = yolo_loss(out3, targets, 416, net.neck.block3.yolo_layer.scaled_anchors)
+    losses = loss_1 + loss_2 + loss_3
+    s_loss = losses.detach().cpu().item()
+    optim.zero_grad()
+    losses.backward()
     optim.step()
     print("=> Loss: ", s_loss)
 
@@ -58,4 +64,4 @@ def train_fn(engine, batch):
 
 
 train_engine = Engine(train_fn)
-train_engine.run(train_dl, max_epochs=5)
+train_engine.run(train_dl, max_epochs=1)

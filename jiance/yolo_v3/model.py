@@ -1,244 +1,384 @@
-"""YOLO v3 Model."""
+"""YOLO v3 Models."""
+
+import logging
+from typing import Callable, Dict, Optional, Sequence, Tuple
+
 import torch
-from torch import nn
-from torchvision.ops import box_convert
+import torch.nn.functional as F
+from torch import Tensor, nn
 
-from jiance.yolo_v3.utils import parse_cfg, wh_bbox_iou
+__all__ = (
+    "ANCHORS",
+    "ConvBN",
+    "ResidualBlock",
+    "BackBone",
+    "YOLOLayer",
+    "MidBlock",
+    "Neck",
+    "YOLOv3",
+)
+
+logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
+log = logging.getLogger(__name__)
 
 
-def create_yolo_v3(modules):
-    """Creating YOLOv3 Layers."""
-    net_cfg = modules.pop(0)
-    output_filters = [int(net_cfg["channels"])]
-    module_list = nn.ModuleList()
+ANCHORS = (
+    ((10, 13), (16, 30), (33, 23)),
+    ((30, 61), (62, 45), (59, 119)),
+    ((116, 90), (156, 198), (373, 326)),
+)
 
-    for i, module in enumerate(modules):
-        module_seq = nn.Sequential()
 
-        if module["type"] == "convolutional":
-            bn = int(module["batch_normalize"])
-            filters = int(module["filters"])
-            kernel_size = int(module["size"])
-            stride = int(module["stride"])
-            padding = (kernel_size - 1) // 2
-            module_seq.add_module(
-                f"conv_{i}",
-                nn.Conv2d(
-                    output_filters[-1],
-                    filters,
-                    kernel_size,
-                    stride,
-                    padding,
-                    bias=not bn,
-                ),
-            )
-            if bn:
-                module_seq.add_module(f"batch_norm_{i}", nn.BatchNorm2d(filters, 0.9))
-            if module["activation"] == "leaky":
-                module_seq.add_module(f"leaky_{i}", nn.LeakyReLU(0.1, True))
+class ConvBN(nn.Module):
+    """
+    Convolution2D -> Normalization -> Activation Block.
 
-        elif module["type"] == "maxpool":
-            kernel_size = int(module["size"])
-            stride = int(module["stride"])
-            padding = (kernel_size - 1) // 2
-            module_seq.add_module(
-                f"max_pool_{i}", nn.MaxPool2d(kernel_size, stride, padding)
-            )
+    Args:
+        in_channels (int)
+        out_channels (int)
+        kernel_size (int)
+        norm_layer (Callable): Default BatchNorm2d.
+        activation_layer (Callable): Default LeakyReLU
+        **conv_kwargs
+    """
 
-        elif module["type"] == "upsample":
-            stride = int(module["stride"])
-            module_seq.add_module(f"upsample_{i}", nn.Upsample(scale_factor=stride))
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        norm_layer: Optional[Callable[..., nn.Module]] = None,
+        activation_layer: Optional[Callable[..., nn.Module]] = None,
+        **conv_kwargs: Optional[Dict],
+    ) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            bias=False,
+            padding=(kernel_size - 1) // 2,
+            **conv_kwargs,
+        )
+        self.norm = norm_layer or nn.BatchNorm2d(out_channels)
+        self.activation = activation_layer or nn.LeakyReLU(0.1, inplace=True)
 
-        elif module["type"] == "shortcut":
-            filters = output_filters[1:][int(module["from"])]
-            module_seq.add_module(f"shortcut_{i}", EmptyLayer())
+    def forward(self, inputs: Tensor) -> Tensor:
+        """
+        ConvBN forward function.
 
-        elif module["type"] == "route":
-            layers = [int(x) for x in module["layers"].split(",")]
-            filters = sum([output_filters[1:][i] for i in layers])
-            module_seq.add_module(f"route_{i}", EmptyLayer())
+        Args:
+            inputs (Tensor)
+        """
+        return self.activation(self.norm(self.conv(inputs)))
 
-        elif module["type"] == "yolo":
-            mask = [int(m) for m in module["mask"].split(",")]
-            anchors = [int(a) for a in module["anchors"].split(",")]
-            anchors = [(anchors[a], anchors[a + 1]) for a in range(0, len(anchors), 2)]
-            anchors = [anchors[m] for m in mask]
-            num_classes = int(module["classes"])
-            img_size = int(net_cfg["width"])
 
-            yolo_layer = YOLOLayer(anchors, num_classes, img_size)
-            module_seq.add_module(f"yolo_{i}", yolo_layer)
+class ResidualBlock(nn.Module):
+    """
+    Residual 2 ConvBN Blocks.
 
-        module_list.append(module_seq)
-        output_filters.append(filters)
+    Args:
+        in_channels (int)
+    """
 
-    return net_cfg, module_list
+    def __init__(self, in_channels: int) -> None:
+        super().__init__()
+        if in_channels % 2 != 0:
+            raise ValueError("in_channels must be divisible by 2.")
+        half_channels = in_channels // 2
+        self.convbn1 = ConvBN(in_channels, half_channels, kernel_size=1)
+        self.convbn2 = ConvBN(half_channels, in_channels, kernel_size=3)
+
+    def forward(self, inputs: Tensor) -> Tensor:
+        """
+        ResidualBlock forward function.
+
+        Args:
+            inputs (Tensor)
+        """
+        shortcut = inputs
+        return self.convbn2(self.convbn1(inputs)) + shortcut
+
+
+def _make_residual_layers(in_channels, out_channels, times):
+    """
+    Make residual block `times` times.
+
+    Args:
+        in_channels (int)
+        out_channels (int)
+        times (int)
+
+    Returns:
+        module_list (nn.Sequential)
+    """
+    module_list = [ConvBN(in_channels, out_channels, kernel_size=3, stride=2)]
+    for _ in range(times):
+        module_list.append(ResidualBlock(out_channels))
+
+    return nn.Sequential(*module_list)
+
+
+class BackBone(nn.Module):
+    """
+    YOLOv3 BackBone Block.
+
+    Returns:
+        output_52, output_26, output_13
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.convbn = ConvBN(3, 32, kernel_size=3)
+        self.res_block_1x = _make_residual_layers(32, 64, 1)
+        self.res_block_2x = _make_residual_layers(64, 128, 2)
+        self.res_block_8x_1 = _make_residual_layers(128, 256, 8)
+        self.res_block_8x_2 = _make_residual_layers(256, 512, 8)
+        self.res_block_4x = _make_residual_layers(512, 1024, 4)
+
+    def forward(self, inputs: Tensor) -> Tuple[Tensor]:
+        """
+        YOLOv3 BackBone forward function.
+
+        Args:
+            inputs (Tensor)
+
+        Returns:
+            Tensor: output_52, output_26, output_13
+        """
+        inputs = self.res_block_2x(self.res_block_1x(self.convbn(inputs)))
+        output_52 = self.res_block_8x_1(inputs)
+        output_26 = self.res_block_8x_2(output_52)
+        output_13 = self.res_block_4x(output_26)
+
+        return output_52, output_26, output_13
 
 
 class YOLOLayer(nn.Module):
-    """The YOLO Layer."""
+    """
+    YOLOv3 YOLO Layer.
 
-    def __init__(self, anchors, num_classes, img_size):
+    Args:
+        anchors (Sequence[int])
+        img_size (int)
+        num_classes (int)
+
+    Returns:
+        prediction (Tensor) [B, A, H, W, C + 5]
+    """
+
+    def __init__(self, anchors: Sequence[int], img_size: int, num_classes: int) -> None:
         super().__init__()
         self.anchors = anchors
+        self.img_size = img_size
         self.num_anchors = len(anchors)
         self.num_classes = num_classes
-        self.img_size = img_size
         self.grid_size = 0
-        self.bce_with_logits_loss = nn.BCEWithLogitsLoss()
-        self.mse_loss = nn.MSELoss()
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.scaled_anchors = 0
 
-    def forward(self, x, targets=None):
-        if x.size(2) != x.size(3):
+    def forward(self, inputs: Tensor) -> Tensor:
+        """
+        YOLOLayer forward function.
+
+        Args:
+            inputs (Tensor)
+
+        Returns:
+            Tensor: pred_bbox, pred_cls, pred_conf in train mode
+            Tensor: pred_bbox * stride, sigmoid(pred_cls), sigmoid(pred_conf) if eval
+        """
+        if inputs.size(2) != inputs.size(3):
             raise ValueError("image must have same height and width.")
 
-        batch_size = x.size(0)
-        grid_size = x.size(2)  # 13x13, 26x26, 52x52
+        batch_size = inputs.size(0)
+        grid_size = inputs.size(2)  # 13x13, 26x26, 52x52
 
         # B - batch_size, A - num_anchors, C - num_classes, H - height, W - width
         # (B, A, C + 5, H, W) -> (B, A, H, W, C + 5)
         # cx, cy are relative values meaning they are between 0 and 1
         # w, h can be greater than 0
-        pred = x.reshape(
+        pred = inputs.reshape(
             batch_size, self.num_anchors, self.num_classes + 5, grid_size, grid_size
         ).permute(0, 1, 3, 4, 2)
 
+        cxcy, wh, pred_conf, pred_cls = torch.split(pred, (2, 2, 1, 20), dim=-1)
+
         # still relative values
-        cxcy = torch.sigmoid(pred[..., :2])
-        wh = pred[..., 2:4]
-        pred_conf = pred[..., 4]
-        pred_cls = pred[..., 5:]
+        cxcy = torch.sigmoid(cxcy)
 
         if self.grid_size != grid_size:
-            print(f"Recomputing for grid size {grid_size}...")
-            self.get_grid_offsets(grid_size)
+            log.info("Recomputing for grid size %s...", grid_size)
+            grid_xy, grid_wh, stride = self.get_grid_offsets(
+                grid_size, device=inputs.device
+            )
+
+        if self.training:
+            pred_bbox = torch.cat((cxcy, wh), dim=-1)
+            return pred_bbox, pred_cls, pred_conf
 
         # get absolute values with equation from the paper
-        abs_cxcy = torch.add(cxcy, self.grid_xy)
-        abs_wh = torch.exp(wh) * self.grid_wh
+        abs_cxcy = torch.add(cxcy, grid_xy)
+        abs_wh = torch.exp(wh) * grid_wh
         pred_bbox = torch.cat((abs_cxcy, abs_wh), dim=-1)
 
-        if not self.training:
-            return (
-                pred_bbox * self.stride,  # to get the actual cxcywh on img_size image
-                torch.sigmoid(pred_conf),
-                torch.sigmoid(pred_cls),
-            )
+        return pred_bbox * stride, torch.sigmoid(pred_cls), torch.sigmoid(pred_conf)
 
-        cxcy_t, wh_t, cls_t, conf_t, obj_mask = self.build_cxcywh_target(
-            cxcy, wh, pred_cls, pred_conf, targets
-        )
-        loss_xy = self.mse_loss(cxcy, cxcy_t)
-        loss_wh = self.mse_loss(wh, wh_t)
-        loss_conf = self.bce_with_logits_loss(pred_conf, conf_t)
-        loss_cls = self.bce_with_logits_loss(pred_cls, cls_t)
-        losses = loss_xy + loss_wh + loss_conf + loss_cls
-        metrics = None
-
-        return (pred_bbox, pred_conf, pred_cls), losses, metrics
-
-    def get_grid_offsets(self, grid_size):
+    def get_grid_offsets(self, grid_size, device):
         self.grid_size = grid_size
-        self.stride = self.img_size / self.grid_size
-        t = torch.arange(grid_size, device=self.device)
-        y, x = torch.meshgrid(t, t)
+        stride = self.img_size / self.grid_size
+        aranged_tensor = torch.arange(grid_size, device=device)
+        # grid_x is increasing values in x-axis
+        # grid_y is increasing values in y-axis
+        grid_y, grid_x = torch.meshgrid(aranged_tensor, aranged_tensor)
         # (1, 1, 13, 13, 2)
-        self.grid_xy = torch.stack((x, y), dim=-1).unsqueeze(0).unsqueeze(0)
+        grid_xy = torch.stack((grid_x, grid_y), dim=-1).unsqueeze(0).unsqueeze(0)
         self.scaled_anchors = torch.tensor(
-            [(w / self.stride, h / self.stride) for w, h in self.anchors],
-            device=self.device,
+            [(w / stride, h / stride) for (w, h) in self.anchors],
+            device=device,
         )
         # (1, 3, 1, 1, 2)
-        self.grid_wh = self.scaled_anchors.reshape(1, self.num_anchors, 1, 1, 2)
+        grid_wh = self.scaled_anchors.reshape(1, self.num_anchors, 1, 1, 2)
 
-    def build_cxcywh_target(self, cxcy, wh, pred_cls, pred_conf, targets):
-        # cxcywh - N x A x H x W x 2
-        # wh - N x A x H x W x 2
-        # pred_cls - N x A x H x W x 20
-        # pred_conf - N x A x H x W x 1
-        # targets - Tuple[Sequence[List[Sequence[List]]]]
-        # targets - ([[], []], [[], [], []])
-        # anchors - 3 x 2
-
-        # cxcy_t = torch.rand_like(cxcy)
-        # wh_t = torch.rand_like(wh)
-        # conf_t = torch.rand_like(pred_conf)
-        # cls_t = torch.rand_like(pred_cls)
-
-        cxcy_t = torch.zeros_like(cxcy, device=self.device)
-        wh_t = torch.zeros_like(wh, device=self.device)
-        conf_t = torch.zeros_like(pred_conf, device=self.device)
-        cls_t = torch.zeros_like(pred_cls, device=self.device)
-        obj_mask = torch.zeros(cxcy[..., 0].shape).long()
-
-        for batch_idx, target in enumerate(targets):
-            target = torch.tensor(target, dtype=cxcy.dtype, device=self.device)
-            cxcywh, class_idx = target[:, :-1], target[:, -1]
-            cxcywh = torch.div(box_convert(cxcywh, "xyxy", "cxcywh"), self.stride)
-
-            cxcy_ = cxcywh[:, :2]
-            wh = cxcywh[:, 2:]
-            ious = torch.stack(
-                [wh_bbox_iou(anchor, wh) for anchor in self.scaled_anchors]
-            )
-            best_ious, best_n = ious.max(0)
-            H, W = cxcy_.long().t()
-
-            # obj_mask[batch_idx, best_n, H, W] = 1
-            cxcy_t[batch_idx, best_n, H, W, :] = cxcy_ - cxcy_.floor()
-            wh_t[batch_idx, best_n, H, W, :] = torch.log(
-                wh / self.scaled_anchors[best_n] + 1e-16
-            )
-            conf_t[batch_idx, best_n, H, W] = 1
-            cls_t[batch_idx, best_n, H, W, class_idx.long()] = 1
-
-        # cxcywh = cxcywh * (cxcy.size(2) / 416)  # grid_size cxcywh
-        # cxcy_ = cxcywh[..., :2].squeeze(0)
-        # wh = cxcywh[..., 2:]
-        # batch_size, class_idx = target[0, ...].long(), target[..., -1]
-        # h, w = cxcy_.long().t()
-
-        # cxcy_t[batch_size, 1, h, w, 0] = cxcy_[0] - cxcy_[0].floor()
-        # cxcy_t[batch_size, 1, h, w, 1] = cxcy_[1] - cxcy_[1].floor()
-        # wh_t[batch_size, 1, h, w, :] = torch.log(wh / anchors + 1e-16)
-        # conf_t[..., :] = 1 if class_idx > 0 else 0
-        # cls_t[..., :] = class_idx
-
-        return cxcy_t, wh_t, cls_t, conf_t, obj_mask
+        return grid_xy, grid_wh, stride
 
 
-class EmptyLayer(nn.Module):
-    def __init__(self):
+class MidBlock(nn.Module):
+    """
+    Middle block of YOLOve Neck.
+
+    Args:
+        in_channels (int)
+        out_channels (int)
+        anchors (Sequence[int])
+        img_size (int)
+        num_classes (int)
+
+    Returns:
+        inputs, branch (Tuple[Tensor], Tensor)
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        anchors: Sequence[int],
+        img_size: int,
+        num_classes: int,
+    ) -> None:
         super().__init__()
+        if out_channels % 2 != 0:
+            raise ValueError("out_channels must be divisible by 2.")
+        half_channels = out_channels // 2
+        self.sequential = nn.Sequential(
+            ConvBN(in_channels, half_channels, kernel_size=1),
+            ConvBN(half_channels, out_channels, kernel_size=3),
+            ConvBN(out_channels, half_channels, kernel_size=1),
+            ConvBN(half_channels, out_channels, kernel_size=3),
+            ConvBN(out_channels, half_channels, kernel_size=1),
+        )
+        self.branch = ConvBN(half_channels, out_channels, kernel_size=3)
+        self.conv = nn.Conv2d(
+            out_channels, (num_classes + 5) * len(anchors), 1, bias=True
+        )
+        self.yolo_layer = YOLOLayer(anchors, img_size, num_classes)
+
+    def forward(self, inputs: Tensor) -> Tuple[Tensor]:
+        """
+        YOLOv3 Neck MidBlock forward function.
+
+        Args:
+            inputs (Tensor)
+
+        Returns:
+            Tuple[Tensor], Tensor: inputs, branch (value from the last ConvBN layer)
+        """
+        branch = self.sequential(inputs)
+        inputs = self.yolo_layer(self.conv(self.branch(branch)))
+
+        return inputs, branch
+
+
+class Neck(nn.Module):
+    """
+    YOLOv3 Neck.
+
+    Args:
+        img_size (int)
+        num_classes (int)
+
+    Returns:
+        out1, out2, out3 (Tuple[Tensor])
+    """
+
+    def __init__(self, img_size: int, num_classes: int) -> None:
+        super().__init__()
+        self.block1 = MidBlock(1024, 1024, ANCHORS[-1], img_size, num_classes)
+        self.convbn1 = ConvBN(512, 256, kernel_size=1)
+        self.block2 = MidBlock(768, 512, ANCHORS[1], img_size, num_classes)
+        self.convbn2 = ConvBN(256, 128, kernel_size=1)
+        self.block3 = MidBlock(384, 256, ANCHORS[0], img_size, num_classes)
+
+    def forward(
+        self, input_52: Tensor, input_26: Tensor, input_13: Tensor
+    ) -> Tuple[Tensor]:
+        """
+        YOLOv3 Neck Block forward function.
+
+        Args:
+            input_52 (Tensor)
+            input_26 (Tensor)
+            input_13 (Tensor)
+
+        Returns:
+            Tuple[Tensor]: out1, out2, out3
+        """
+        out1, branch = self.block1(input_13)
+        inputs = self.convbn1(branch)
+        inputs = F.interpolate(inputs, scale_factor=2.0)
+        inputs = torch.cat((input_26, inputs), dim=1)
+        out2, branch = self.block2(inputs)
+        inputs = self.convbn2(branch)
+        inputs = F.interpolate(inputs, scale_factor=2.0)
+        inputs = torch.cat((input_52, inputs), dim=1)
+        out3, _ = self.block3(inputs)
+
+        return out1, out2, out3
 
 
 class YOLOv3(nn.Module):
-    def __init__(self, cfg: str):
+    """
+    The Final YOLOv3 Model.
+
+    Args:
+        img_size (int)
+        num_classes (int)
+
+    Returns:
+        out1, out2, out3 (Tuple[Tensor])
+    """
+
+    def __init__(self, img_size: int, num_classes: int) -> None:
         super().__init__()
-        self.modules_def = parse_cfg(cfg)
-        self.net_cfg, self.module_list = create_yolo_v3(self.modules_def)
+        self.backbone = BackBone()
+        self.neck = Neck(img_size, num_classes)
 
-    def forward(self, x, targets=None):
-        loss = 0
-        layer_outputs, yolo_outputs = [], {}
-        for i, (module_def, module) in enumerate(
-            zip(self.modules_def, self.module_list)
-        ):
-            if module_def["type"] in ("convolutional", "upsample", "maxpool"):
-                x = module(x)
-            elif module_def["type"] == "route":
-                x = torch.cat(
-                    [layer_outputs[int(i)] for i in module_def["layers"].split(",")],
-                    dim=1,
-                )
-            elif module_def["type"] == "shortcut":
-                x = layer_outputs[-1] + layer_outputs[int(module_def["from"])]
-            elif module_def["type"] == "yolo":
-                x, losses, _ = module[0](x, targets)
-                loss += losses
-                # yolo_outputs.append(x)
-                yolo_outputs[i] = x
-            layer_outputs.append(x)
+    def forward(self, inputs: Tensor) -> Tensor:
+        """
+        YOLOv3 forward function.
 
-        return yolo_outputs, loss
+        Args:
+            inputs (Tensor)
+
+        Returns:
+            Tuple[Tensor]: out1, out2, out3
+        """
+        output_52, output_26, output_13 = self.backbone(inputs)
+        out1, out2, out3 = self.neck(output_52, output_26, output_13)
+
+        return out1, out2, out3
+
+
+net = YOLOv3(416, 20)
+x = torch.rand(1, 3, 416, 416)
+
+a, b, c = net(x)
