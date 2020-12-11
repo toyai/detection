@@ -24,7 +24,7 @@ def find_version(*file_paths):
 
 readme = read("README.md")
 
-VERSION = find_version("jiance", "__init__.py")
+VERSION = find_version("toydet", "__init__.py")
 
 extra = {}
 
@@ -37,13 +37,13 @@ install_requires = [
 ]
 
 extra["testing"] = ["coverage>=5.3", "parameterized>=0.7.4"]
-extra["quality"] = ["pylint", "isort[colors]", "black", "mypy", "flake8"]
+extra["quality"] = ["pylint", "isort[colors]", "black", "flake8"]
 
 extra["dev"] = extra["testing"] + extra["quality"]
 
 
 setup(
-    name="jiance",
+    name="toydet",
     version=VERSION,
     author="toyai",
     url="https://github.com/toyai/detection",

@@ -2,7 +2,7 @@ name: ci_code_quality
 
 on:
   push:
-    branches: [dev]
+    branches: [main]
   pull_request:
 
 jobs:

@@ -1,9 +1,8 @@
 """YOLO v3 Model."""
 import torch
+from jiance.yolo_v3.utils import parse_cfg, wh_bbox_iou
 from torch import nn
 from torchvision.ops import box_convert
-
-from jiance.yolo_v3.utils import parse_cfg, wh_bbox_iou
 
 
 def create_yolo_v3(modules):

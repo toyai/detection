@@ -61,7 +61,7 @@ class ConvBN(nn.Module):
             **conv_kwargs,
         )
         self.norm = norm_layer or nn.BatchNorm2d(out_channels)
-        self.activation = activation_layer or nn.LeakyReLU(0.1, inplace=True)
+        self.activation = activation_layer or nn.LeakyReLU(0.1)
 
     def forward(self, inputs: Tensor) -> Tensor:
         """
@@ -174,7 +174,8 @@ class YOLOLayer(nn.Module):
         self.num_anchors = len(anchors)
         self.num_classes = num_classes
         self.grid_size = 0
-        self.scaled_anchors = 0
+        self.scaled_anchors = ...
+        self.stride = ...
 
     def forward(self, inputs: Tensor) -> Tensor:
         """
@@ -195,33 +196,41 @@ class YOLOLayer(nn.Module):
 
         # B - batch_size, A - num_anchors, C - num_classes, H - height, W - width
         # (B, A, C + 5, H, W) -> (B, A, H, W, C + 5)
+        # cx, cy - center x, center y
         # cx, cy are relative values meaning they are between 0 and 1
         # w, h can be greater than 0
-        pred = inputs.reshape(
-            batch_size, self.num_anchors, self.num_classes + 5, grid_size, grid_size
-        ).permute(0, 1, 3, 4, 2)
+        pred = (
+            inputs.reshape(
+                batch_size, self.num_anchors, self.num_classes + 5, grid_size, grid_size
+            )
+            .permute(0, 1, 3, 4, 2)
+            .contiguous()
+        )
 
-        cxcy, wh, pred_conf, pred_cls = torch.split(pred, (2, 2, 1, 20), dim=-1)
-
-        # still relative values
-        cxcy = torch.sigmoid(cxcy)
+        # still relative values, sigmoid(txty) from paper
+        pred[..., :2] = torch.sigmoid(pred[..., :2])
 
         if self.grid_size != grid_size:
-            log.info("Recomputing for grid size %s...", grid_size)
-            grid_xy, grid_wh, stride = self.get_grid_offsets(
+            log.info("Recomputing for grid size %s ...", grid_size)
+            grid_xy, grid_wh, self.stride = self.get_grid_offsets(
                 grid_size, device=inputs.device
             )
 
         if self.training:
-            pred_bbox = torch.cat((cxcy, wh), dim=-1)
-            return pred_bbox, pred_cls, pred_conf
+            return torch.split(pred, (4, 20, 1), dim=-1)
+
+        cxcy, wh, pred_conf, pred_cls = torch.split(pred, (2, 2, 1, 20), dim=-1)
 
         # get absolute values with equation from the paper
         abs_cxcy = torch.add(cxcy, grid_xy)
         abs_wh = torch.exp(wh) * grid_wh
         pred_bbox = torch.cat((abs_cxcy, abs_wh), dim=-1)
 
-        return pred_bbox * stride, torch.sigmoid(pred_cls), torch.sigmoid(pred_conf)
+        return (
+            pred_bbox * self.stride,
+            torch.sigmoid(pred_cls),
+            torch.sigmoid(pred_conf),
+        )
 
     def get_grid_offsets(self, grid_size, device):
         self.grid_size = grid_size
@@ -232,6 +241,7 @@ class YOLOLayer(nn.Module):
         grid_y, grid_x = torch.meshgrid(aranged_tensor, aranged_tensor)
         # (1, 1, 13, 13, 2)
         grid_xy = torch.stack((grid_x, grid_y), dim=-1).unsqueeze(0).unsqueeze(0)
+        # pylint: disable=not-callable
         self.scaled_anchors = torch.tensor(
             [(w / stride, h / stride) for (w, h) in self.anchors],
             device=device,
@@ -376,9 +386,3 @@ class YOLOv3(nn.Module):
         out1, out2, out3 = self.neck(output_52, output_26, output_13)
 
         return out1, out2, out3
-
-
-net = YOLOv3(416, 20)
-x = torch.rand(1, 3, 416, 416)
-
-a, b, c = net(x)

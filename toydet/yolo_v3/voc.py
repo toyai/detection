@@ -4,10 +4,9 @@ import os
 import xml.etree.ElementTree as ET
 from typing import Callable, List, Optional, Tuple
 
-import cv2
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from PIL import Image
 from torchvision.datasets import VOCDetection
 from torchvision.transforms import ToTensor
 
@@ -63,69 +62,38 @@ class VOCDataset(VOCDetection):
         self.transforms = transforms
 
     def __getitem__(self, index: int) -> Tuple[np.ndarray, List]:
-        img = cv2.imread(self.images[index])
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        # img = cv2.imread(self.images[index])
+        # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = Image.open(self.images[index]).convert("RGB")
 
         root_ = ET.parse(self.annotations[index]).getroot()
         targets = []
         for obj in root_.iter("object"):
-            target = []
+            target = [0]
             bbox = obj.find("bndbox")
+            target.append(CLASSES.index(obj.find("name").text))
             for xyxy in ("xmin", "ymin", "xmax", "ymax"):
                 target.append(int(bbox.find(xyxy).text))
-            target.append(obj.find("name").text)
             targets.append(target)
 
+        targets = np.array(targets, dtype=np.float32)
         if self.transforms:
-            transformed = self.transforms(image=img, bboxes=targets)
-            img, targets = transformed["image"], transformed["bboxes"]
-            # return `targets` is a list of tuples
-            targets = [list(t) for t in targets]
+            bboxes = targets[:, 2:]
+            img, bboxes = self.transforms(img, target=bboxes)
+            # transformed = self.transforms(image=img, bboxes=targets)
+            # img, targets = transformed["image"], transformed["bboxes"]
+            # # return `targets` is a list of tuples
+            # targets = [list(t) for t in targets]
+            targets[:, 2:] = bboxes
 
-        for t in targets:
-            t[-1] = CLASSES.index(t[-1]) + 1
-
-        return img, targets
+        return img, torch.from_numpy(targets)  # pylint: disable=not-callable
 
 
 def collate_fn(batch):
-    imgs, targets = tuple(zip(*batch))
+    imgs, targets = zip(*batch)
     imgs = [ToTensor()(img) for img in imgs]
     imgs = torch.stack(imgs, dim=0)
+    for idx, target in enumerate(targets):
+        target[:, 0] = idx
 
-    return imgs, targets
-
-
-def draw_bbox(img, target):
-    undraw_img = np.copy(img)
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.75
-    color = np.random.random(3) * 255
-    for t in target:
-        xmin, ymin, xmax, ymax, class_id = t
-        xmin, ymin, xmax, ymax = map(int, t[:-1])
-        name = CLASSES[class_id]
-        w, h = cv2.getTextSize(
-            text=name, fontFace=font, fontScale=font_scale, thickness=2
-        )[0]
-        cv2.rectangle(img, (xmin, ymin), (xmax, ymax), color=color, thickness=2)
-        cv2.rectangle(
-            img,
-            (xmin, ymin),
-            (xmin + w, ymin + h),
-            color=[c * 0.125 if not 200 > c > 180 else 0 for c in color],
-            thickness=cv2.FILLED,
-        )
-        cv2.putText(
-            img,
-            text=name,
-            org=(xmin, ymin + h),
-            fontFace=font,
-            fontScale=font_scale,
-            color=color,
-            thickness=2,
-        )
-    plt.imshow(img)
-    plt.show()
-
-    return undraw_img
+    return imgs, torch.cat(targets, dim=0)

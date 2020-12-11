@@ -1,7 +1,4 @@
 """
-jiance (detection in Chinese)
-=============================
-
 Custom object detection with common neural networks.
 This module will contain common object detection neural networks
 and backbone neural networks.
