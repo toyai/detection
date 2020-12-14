@@ -5,7 +5,7 @@ from unittest import TestCase, main
 import torch
 from parameterized import parameterized
 
-from jiance.yolo_v3.model import (
+from toydet.yolo_v3.model import (
     ANCHORS,
     BackBone,
     ConvBN,

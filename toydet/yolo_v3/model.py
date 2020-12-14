@@ -195,20 +195,16 @@ class YOLOLayer(nn.Module):
         grid_size = inputs.size(2)  # 13x13, 26x26, 52x52
 
         # B - batch_size, A - num_anchors, C - num_classes, H - height, W - width
-        # (B, A, C + 5, H, W) -> (B, A, H, W, C + 5)
+        # (B, A, C + 5, H, W)
         # cx, cy - center x, center y
         # cx, cy are relative values meaning they are between 0 and 1
         # w, h can be greater than 0
-        pred = (
-            inputs.reshape(
-                batch_size, self.num_anchors, self.num_classes + 5, grid_size, grid_size
-            )
-            .permute(0, 1, 3, 4, 2)
-            .contiguous()
-        )
+        pred = inputs.reshape(
+            batch_size, self.num_anchors, self.num_classes + 5, grid_size, grid_size
+        ).contiguous()
 
         # still relative values, sigmoid(txty) from paper
-        pred[..., :2] = torch.sigmoid(pred[..., :2])
+        pred[:, :, :2, :, :] = torch.sigmoid(pred[:, :, :2, :, :])
 
         if self.grid_size != grid_size:
             log.info("Recomputing for grid size %s ...", grid_size)
@@ -217,14 +213,15 @@ class YOLOLayer(nn.Module):
             )
 
         if self.training:
-            return torch.split(pred, (4, 20, 1), dim=-1)
+            # cxcywh, confidence, class
+            return torch.split(pred, (4, 1, 20), dim=2)
 
-        cxcy, wh, pred_conf, pred_cls = torch.split(pred, (2, 2, 1, 20), dim=-1)
+        cxcy, wh, pred_conf, pred_cls = torch.split(pred, (2, 2, 1, 20), dim=2)
 
         # get absolute values with equation from the paper
         abs_cxcy = torch.add(cxcy, grid_xy)
         abs_wh = torch.exp(wh) * grid_wh
-        pred_bbox = torch.cat((abs_cxcy, abs_wh), dim=-1)
+        pred_bbox = torch.cat((abs_cxcy, abs_wh), dim=2)
 
         return (
             pred_bbox * self.stride,
@@ -239,15 +236,15 @@ class YOLOLayer(nn.Module):
         # grid_x is increasing values in x-axis
         # grid_y is increasing values in y-axis
         grid_y, grid_x = torch.meshgrid(aranged_tensor, aranged_tensor)
-        # (1, 1, 13, 13, 2)
-        grid_xy = torch.stack((grid_x, grid_y), dim=-1).unsqueeze(0).unsqueeze(0)
+        # (1, 1, 2, 13, 13)
+        grid_xy = torch.stack((grid_x, grid_y), dim=0).unsqueeze(0).unsqueeze(0)
         # pylint: disable=not-callable
         self.scaled_anchors = torch.tensor(
             [(w / stride, h / stride) for (w, h) in self.anchors],
             device=device,
         )
-        # (1, 3, 1, 1, 2)
-        grid_wh = self.scaled_anchors.reshape(1, self.num_anchors, 1, 1, 2)
+        # (1, 3, 2, 1, 1)
+        grid_wh = self.scaled_anchors.reshape(1, self.num_anchors, 2, 1, 1)
 
         return grid_xy, grid_wh, stride
 

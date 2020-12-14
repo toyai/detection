@@ -5,14 +5,14 @@ import shutil
 from random import randint
 from unittest import TestCase, main
 
-import albumentations as A
 import numpy as np
 from ignite.utils import manual_seed
 from PIL import Image
 from torch import Tensor
 from torch.utils.data import DataLoader
 
-from jiance.yolo_v3.voc import CLASSES, VOCDataset, collate_fn
+from toydet.transforms import LetterBox, MultiArgsSequential
+from toydet.yolo_v3.voc import CLASSES, VOCDataset, collate_fn
 
 manual_seed(666)
 
@@ -76,29 +76,22 @@ def _create_voc_ds(total_images):
 class TestVOCDataset(TestCase):
     def setUp(self):
         self.img_size = 32
-        self.transforms = A.Compose(
-            [A.Resize(self.img_size, self.img_size)],
-            bbox_params=A.BboxParams(format="pascal_voc"),
-        )
+        self.transforms = MultiArgsSequential(LetterBox(self.img_size))
 
     def test_voc_dataset_without_transforms(self):
         ds = VOCDataset(download=False)
         img, target = next(iter(ds))
-        self.assertIsInstance(img, np.ndarray)
-        self.assertIsInstance(target, list)
+        self.assertIsInstance(img, Image.Image)
+        self.assertIsInstance(target, Tensor)
         self.assertTrue(os.path.exists(os.path.join(os.getcwd(), "VOCdevkit/VOC2012")))
 
     def test_voc_dataset_with_transforms(self):
         num_classes = 20
         ds = VOCDataset(download=False, transforms=self.transforms)
         img, targets = next(iter(ds))
-        self.assertEqual(img.shape, (self.img_size, self.img_size, 3))
-        self.assertTrue(
-            all(size <= self.img_size for target in targets for size in target[:4])
-        )
-        self.assertTrue(
-            all(cls_idx <= num_classes for target in targets for cls_idx in target[-1:])
-        )
+        self.assertEqual(img.size, (self.img_size, self.img_size))
+        self.assertTrue((targets[:, 2:] <= self.img_size).all())
+        self.assertTrue((targets[:, 1] <= num_classes).all())
 
     def test_voc_dataloader(self):
         bs = 2
@@ -106,10 +99,9 @@ class TestVOCDataset(TestCase):
         dl = DataLoader(ds, batch_size=bs, collate_fn=collate_fn)
         for imgs, targets in dl:
             self.assertIsInstance(imgs, Tensor)
-            self.assertIsInstance(targets, tuple)
-            self.assertTrue(all(isinstance(target, list) for target in targets))
+            self.assertIsInstance(targets, Tensor)
             self.assertEqual(imgs.shape, (bs, 3, self.img_size, self.img_size))
-            self.assertEqual(len(targets), bs)
+            self.assertEqual(targets.size(-1), 6)
 
 
 _create_voc_ds(6)

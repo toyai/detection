@@ -4,7 +4,8 @@ import torch
 from ignite.utils import manual_seed
 from torch import Tensor
 from torch.nn import functional as F
-from torchvision.ops import box_convert
+from torch.nn.functional import pad
+from torchvision.ops import box_convert, box_iou
 
 manual_seed(666)
 
@@ -37,14 +38,14 @@ def wh_bbox_iou(wh1, wh2):
     return inter_area / union_area
 
 
-def yolo_loss(pred_bbox, pred_cls, pred_conf, target: Tensor, stride, anchors):
+def yolo_loss(pred_bbox, pred_conf, pred_cls, target: Tensor, stride, anchors):
     # target_bbox = torch.zeros_like(pred_bbox, device=pred_bbox.device)
     # target_cls = torch.zeros_like(pred_cls, device=pred_cls.device)
     # target_conf = torch.zeros_like(pred_conf, device=pred_conf.device)
 
     # target_cxcy, target_wh = torch.split(target_bbox, (2, 2), dim=-1)
 
-    pred_cxcy, pred_wh = torch.split(pred_bbox, (2, 2), dim=-1)
+    pred_cxcy, pred_wh = torch.split(pred_bbox, (2, 2), dim=2)
     (
         ious_scores,
         obj_mask,
@@ -52,7 +53,7 @@ def yolo_loss(pred_bbox, pred_cls, pred_conf, target: Tensor, stride, anchors):
         target_wh,
         target_cls,
         target_conf,
-    ) = build_targets(pred_bbox, pred_cls, pred_conf, target, stride, anchors)
+    ) = build_targets(pred_bbox, pred_conf, pred_cls, target, stride, anchors)
 
     # for batch_idx, target in enumerate(targets):
     #     target = torch.tensor(target, dtype=pred_cxcy.dtype, device=pred_cxcy.device)
@@ -80,32 +81,36 @@ def yolo_loss(pred_bbox, pred_cls, pred_conf, target: Tensor, stride, anchors):
     return losses
 
 
-def build_targets(pred_bbox, pred_cls, pred_conf, target: Tensor, stride, anchors):
+def build_targets(pred_bbox, pred_conf, pred_cls, target: Tensor, stride, anchors):
     target_bbox = torch.zeros_like(pred_bbox, device=pred_bbox.device)
     target_cls = torch.zeros_like(pred_cls, device=pred_cls.device)
     ious_scores = torch.zeros_like(pred_cls, device=pred_cls.device)
     obj_mask = torch.zeros_like(pred_conf, device=pred_conf.device)
 
-    target_cxcy, target_wh = torch.split(target_bbox, (2, 2), dim=-1)
-    target[:, 2:6] = box_convert(target[:, 2:6], "xyxy", "cxcywh") / stride
+    target_cxcy, target_wh = torch.split(target_bbox, (2, 2), dim=2)
+    target_ = target.clone()
+    target_[:, 2:6] = box_convert(target[:, 2:6], "xyxy", "cxcywh") / stride
 
-    cxcywh_t = torch.narrow(target, dim=-1, start=2, length=4)
+    cxcywh_t = torch.narrow(target_, dim=-1, start=2, length=4)
     cxcy_t = torch.narrow(cxcywh_t, dim=-1, start=0, length=2)
     wh_t = torch.narrow(cxcywh_t, dim=-1, start=2, length=2)
-    ious = torch.stack([wh_bbox_iou(anchor, wh_t) for anchor in anchors])
+    # ious = torch.stack([wh_bbox_iou(anchor, wh_t) for anchor in anchors])
+    wh_t_ = pad(wh_t, (2, 0, 0, 0))
+    anchors_ = pad(anchors, (2, 0, 0, 0))
+    ious = box_iou(anchors_, wh_t_)
     best_ious, best_n = torch.max(ious, 0)
 
     batch, labels = torch.narrow(target, dim=-1, start=0, length=2).long().t()
     width, height = cxcy_t.long().t()
 
-    obj_mask[batch, best_n, height, width, :] = 1
+    obj_mask[batch, best_n, :, height, width] = 1
 
-    target_cxcy[batch, best_n, height, width, :] = cxcy_t - torch.floor(cxcy_t)
-    target_wh[batch, best_n, height, width, :] = torch.log(
-        wh_t / anchors[best_n] + 1e-16
+    target_cxcy[batch, best_n, :, height, width] = cxcy_t - torch.floor(cxcy_t)
+    target_wh[batch, best_n, :, height, width] = torch.log(
+        wh_t / (anchors[best_n] + 1e-16)
     )
 
-    target_cls[batch, best_n, height, width, labels] = 1
+    target_cls[batch, best_n, labels, height, width] = 1
     # ious_scores[batch, best_n, height, width] = box_iou(
     #     pred_bbox[batch, best_n, height, width], target_bbox
     # )

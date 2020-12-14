@@ -29,7 +29,8 @@ def draw_bounding_boxes(
     elif isinstance(boxes, np.ndarray):
         boxes = boxes.tolist()
 
-    draw = ImageDraw.Draw(image)
+    image_ = image.copy()
+    draw = ImageDraw.Draw(image_)
     font = (
         ImageFont.load_default()
         if font is None
@@ -43,4 +44,4 @@ def draw_bounding_boxes(
         if labels is not None:
             draw.text((box[0] + width, box[1]), labels[i], font=font, fill=color)
 
-    return image
+    return image_

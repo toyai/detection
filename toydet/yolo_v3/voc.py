@@ -10,6 +10,8 @@ from PIL import Image
 from torchvision.datasets import VOCDetection
 from torchvision.transforms import ToTensor
 
+from toydet.utils import draw_bounding_boxes
+
 # ----
 # VOC
 # ----
@@ -57,9 +59,12 @@ class VOCDataset(VOCDetection):
         image_set: str = "train",
         download: bool = False,
         transforms: Optional[Callable] = None,
+        batch_size: Optional[int] = 128,
     ):
         super().__init__(root, year, image_set, download, transforms)
         self.transforms = transforms
+        self.batch_size = batch_size
+        self.index = 0
 
     def __getitem__(self, index: int) -> Tuple[np.ndarray, List]:
         # img = cv2.imread(self.images[index])
@@ -86,6 +91,13 @@ class VOCDataset(VOCDetection):
             # targets = [list(t) for t in targets]
             targets[:, 2:] = bboxes
 
+        if (self.index + 1) % self.batch_size == 0:
+            boxes = targets[:, 2:]
+            labels = [CLASSES[int(label)] for label in targets[:, 1].tolist()]
+            img_ = draw_bounding_boxes(img, boxes, labels)
+            img_.show()
+
+        self.index += 1
         return img, torch.from_numpy(targets)  # pylint: disable=not-callable
 
 
