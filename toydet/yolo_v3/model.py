@@ -18,8 +18,7 @@ __all__ = (
     "YOLOv3",
 )
 
-logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 ANCHORS = (
@@ -207,7 +206,7 @@ class YOLOLayer(nn.Module):
         pred[:, :, :2, :, :] = torch.sigmoid(pred[:, :, :2, :, :])
 
         if self.grid_size != grid_size:
-            log.info("Recomputing for grid size %s ...", grid_size)
+            logger.info("Recomputing for grid size %s ...", grid_size)
             grid_xy, grid_wh, self.stride = self.get_grid_offsets(
                 grid_size, device=inputs.device
             )

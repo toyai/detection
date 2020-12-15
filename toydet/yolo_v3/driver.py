@@ -71,6 +71,7 @@ if __name__ == "__main__":
         is_train = split == "train"
         net.train(is_train)
         imgs, targets = batch[0].to(idist.device()), batch[1].to(idist.device())
+        loss_item = {}
         with torch.set_grad_enabled(is_train):
             out1, out2, out3 = net(imgs)
             loss_1, losses_1_ = yolo_loss(
@@ -92,37 +93,30 @@ if __name__ == "__main__":
                 net.neck.block3.yolo_layer.scaled_anchors,
             )
             losses = losses_1_ + losses_2_ + losses_3_
-            loss_item = dict(
-                "grid_size",
-                (
-                    net.neck.block1.yolo_layer.stride.detach().cpu().item(),
-                    net.neck.block2.yolo_layer.stride.detach().cpu().item(),
-                    net.neck.block2.yolo_layer.stride.detach().cpu().item(),
-                ),
-                "loss_xy",
-                (
-                    loss_1[0].detach().cpu().item(),
-                    loss_2[0].detach().cpu().item(),
-                    loss_3[0].detach().cpu().item(),
-                ),
-                "loss_wh",
-                (
-                    loss_1[1].detach().cpu().item(),
-                    loss_2[1].detach().cpu().item(),
-                    loss_3[1].detach().cpu().item(),
-                ),
-                "loss_cls",
-                (
-                    loss_1[2].detach().cpu().item(),
-                    loss_2[2].detach().cpu().item(),
-                    loss_3[2].detach().cpu().item(),
-                ),
-                "loss_conf",
-                (
-                    loss_1[3].detach().cpu().item(),
-                    loss_2[3].detach().cpu().item(),
-                    loss_3[3].detach().cpu().item(),
-                ),
+            loss_item["stride"] = (
+                net.neck.block1.yolo_layer.stride,
+                net.neck.block2.yolo_layer.stride,
+                net.neck.block2.yolo_layer.stride,
+            )
+            loss_item["loss_xy"] = (
+                loss_1[0].detach().cpu().item(),
+                loss_2[0].detach().cpu().item(),
+                loss_3[0].detach().cpu().item(),
+            )
+            loss_item["loss_wh"] = (
+                loss_1[1].detach().cpu().item(),
+                loss_2[1].detach().cpu().item(),
+                loss_3[1].detach().cpu().item(),
+            )
+            loss_item["loss_cls"] = (
+                loss_1[2].detach().cpu().item(),
+                loss_2[2].detach().cpu().item(),
+                loss_3[2].detach().cpu().item(),
+            )
+            loss_item["loss_conf"] = (
+                loss_1[3].detach().cpu().item(),
+                loss_2[3].detach().cpu().item(),
+                loss_3[3].detach().cpu().item(),
             )
 
         if is_train:
