@@ -119,6 +119,7 @@ if __name__ == "__main__":
                 loss_2[3].detach().cpu().item(),
                 loss_3[3].detach().cpu().item(),
             )
+            loss_item["losses"] = losses.detach().cpu().item()
 
         if is_train:
             optimizer.zero_grad()
@@ -169,6 +170,7 @@ if __name__ == "__main__":
             "Epoch %i : Iteration %i" % (engine.state.epoch, engine.state.iteration)
         )
         engine.logger.info("Results\n%s", ptable)
+        engine.logger.info("Total losses: %f", output["losses"])
 
     # create Engine instances
     train_engine = Engine(lambda engine, batch: step_fn("train", batch))
