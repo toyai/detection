@@ -185,15 +185,17 @@ if __name__ == "__main__":
         "Training",
         config.verbose,
         format="[%(levelname)s] %(name)s %(message)s",
+        filepath="log.txt",
     )
     val_engine.logger = setup_logger(
         "Validation",
         config.verbose,
         format="[%(levelname)s] %(name)s %(message)s",
+        filepath="log.txt",
     )
 
     # fire logging event at the end of 100 training batches and 1 val epoch
-    train_engine.add_event_handler(Events.ITERATION_COMPLETED(every=1), show_metrics)
+    train_engine.add_event_handler(Events.ITERATION_COMPLETED(every=100), show_metrics)
     val_engine.add_event_handler(Events.EPOCH_COMPLETED(every=1), show_metrics)
 
     # run val_engine before training and at the end of each training epoch
