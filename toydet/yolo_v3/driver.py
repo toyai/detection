@@ -34,7 +34,6 @@ def load_datasets(bs, split, transforms):
 
 if __name__ == "__main__":
     transforms = MultiArgsSequential(LetterBox(416))
-    logger = logging.getLogger(__name__)
 
     parser = ArgumentParser(description="YOLOv3 Training script")
     parser.add_argument("--bs", type=int, default=16, help="batch size")
@@ -64,13 +63,15 @@ if __name__ == "__main__":
     else:
         config.verbose = logging.WARNING
 
+    logging.basicConfig(level=config.verbose, format="[%(levelname)s] %(message)s")
     net = idist.auto_model(YOLOv3(config.img_size, config.num_classes))
     optimizer = idist.auto_optim(torch.optim.Adam(net.parameters(), lr=config.lr))
+    device = idist.device()
 
     def step_fn(split, batch):
         is_train = split == "train"
         net.train(is_train)
-        imgs, targets = batch[0].to(idist.device()), batch[1].to(idist.device())
+        imgs, targets = batch[0].to(device), batch[1].to(device)
         loss_item = {}
         with torch.set_grad_enabled(is_train):
             out1, out2, out3 = net(imgs)
@@ -96,7 +97,7 @@ if __name__ == "__main__":
             loss_item["stride"] = (
                 net.neck.block1.yolo_layer.stride,
                 net.neck.block2.yolo_layer.stride,
-                net.neck.block2.yolo_layer.stride,
+                net.neck.block3.yolo_layer.stride,
             )
             loss_item["loss_xy"] = (
                 loss_1[0].detach().cpu().item(),
@@ -164,11 +165,10 @@ if __name__ == "__main__":
                 output["loss_conf"][2],
             ]
         )
-        logger.info(
-            "==> [%s] – Epoch %i : Batch %i"
-            % (engine.logger.name, engine.state.epoch, engine.state.iteration)
+        engine.logger.info(
+            "Epoch %i : Iteration %i" % (engine.state.epoch, engine.state.iteration)
         )
-        logger.info(ptable)
+        engine.logger.info("Results\n%s", ptable)
 
     # create Engine instances
     train_engine = Engine(lambda engine, batch: step_fn("train", batch))
@@ -179,11 +179,19 @@ if __name__ == "__main__":
     val_dl = load_datasets(config.bs, "val", config.transforms)
 
     # setup logging info
-    train_engine.logger = setup_logger("TRAINING", config.verbose)
-    val_engine.logger = setup_logger("VALIDATION", config.verbose)
+    train_engine.logger = setup_logger(
+        "Training",
+        config.verbose,
+        format="[%(levelname)s] %(name)s %(message)s",
+    )
+    val_engine.logger = setup_logger(
+        "Validation",
+        config.verbose,
+        format="[%(levelname)s] %(name)s %(message)s",
+    )
 
     # fire logging event at the end of 100 training batches and 1 val epoch
-    train_engine.add_event_handler(Events.ITERATION_COMPLETED(every=100), show_metrics)
+    train_engine.add_event_handler(Events.ITERATION_COMPLETED(every=1), show_metrics)
     val_engine.add_event_handler(Events.EPOCH_COMPLETED(every=1), show_metrics)
 
     # run val_engine before training and at the end of each training epoch
@@ -201,5 +209,6 @@ if __name__ == "__main__":
         Events.EPOCH_COMPLETED, lambda _: val_engine.run(val_dl, max_epochs=1)
     )
 
+    train_engine.logger.info("Using %s ...", device)
     # run the training
     train_engine.run(train_dl, max_epochs=config.epochs)
