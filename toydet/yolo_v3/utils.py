@@ -78,7 +78,7 @@ def yolo_loss(pred_bbox, pred_conf, pred_cls, target: Tensor, stride, anchors):
     loss_conf = F.binary_cross_entropy_with_logits(pred_conf, target_conf)
     losses = loss_xy + loss_wh + loss_cls + loss_conf
 
-    return losses
+    return (loss_xy, loss_wh, loss_cls, loss_conf), losses
 
 
 def build_targets(pred_bbox, pred_conf, pred_cls, target: Tensor, stride, anchors):

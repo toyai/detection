@@ -212,22 +212,22 @@ class YOLOLayer(nn.Module):
                 grid_size, device=inputs.device
             )
 
-        if self.training:
-            # cxcywh, confidence, class
-            return torch.split(pred, (4, 1, 20), dim=2)
+        # if self.training:
+        # cxcywh, confidence, class
+        return torch.split(pred, (4, 1, 20), dim=2)
 
-        cxcy, wh, pred_conf, pred_cls = torch.split(pred, (2, 2, 1, 20), dim=2)
+        # cxcy, wh, pred_conf, pred_cls = torch.split(pred, (2, 2, 1, 20), dim=2)
 
-        # get absolute values with equation from the paper
-        abs_cxcy = torch.add(cxcy, grid_xy)
-        abs_wh = torch.exp(wh) * grid_wh
-        pred_bbox = torch.cat((abs_cxcy, abs_wh), dim=2)
+        # # get absolute values with equation from the paper
+        # abs_cxcy = torch.add(cxcy, grid_xy)
+        # abs_wh = torch.exp(wh) * grid_wh
+        # pred_bbox = torch.cat((abs_cxcy, abs_wh), dim=2)
 
-        return (
-            pred_bbox * self.stride,
-            torch.sigmoid(pred_cls),
-            torch.sigmoid(pred_conf),
-        )
+        # return (
+        #     pred_bbox * self.stride,
+        #     torch.sigmoid(pred_cls),
+        #     torch.sigmoid(pred_conf),
+        # )
 
     def get_grid_offsets(self, grid_size, device):
         self.grid_size = grid_size

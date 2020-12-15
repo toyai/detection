@@ -8,9 +8,7 @@ import numpy as np
 import torch
 from PIL import Image
 from torchvision.datasets import VOCDetection
-from torchvision.transforms import ToTensor
-
-from toydet.utils import draw_bounding_boxes
+from torchvision.transforms.functional import to_tensor
 
 # ----
 # VOC
@@ -39,7 +37,7 @@ CLASSES = [
 ]
 
 
-class VOCDataset(VOCDetection):
+class VOCDetection_(VOCDetection):
     """
     Args:
         root: same as VOCDetection
@@ -59,16 +57,11 @@ class VOCDataset(VOCDetection):
         image_set: str = "train",
         download: bool = False,
         transforms: Optional[Callable] = None,
-        batch_size: Optional[int] = 128,
     ):
-        super().__init__(root, year, image_set, download, transforms)
+        super().__init__(root, year, image_set, download)
         self.transforms = transforms
-        self.batch_size = batch_size
-        self.index = 0
 
     def __getitem__(self, index: int) -> Tuple[np.ndarray, List]:
-        # img = cv2.imread(self.images[index])
-        # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = Image.open(self.images[index]).convert("RGB")
 
         root_ = ET.parse(self.annotations[index]).getroot()
@@ -85,25 +78,14 @@ class VOCDataset(VOCDetection):
         if self.transforms:
             bboxes = targets[:, 2:]
             img, bboxes = self.transforms(img, target=bboxes)
-            # transformed = self.transforms(image=img, bboxes=targets)
-            # img, targets = transformed["image"], transformed["bboxes"]
-            # # return `targets` is a list of tuples
-            # targets = [list(t) for t in targets]
             targets[:, 2:] = bboxes
 
-        if (self.index + 1) % self.batch_size == 0:
-            boxes = targets[:, 2:]
-            labels = [CLASSES[int(label)] for label in targets[:, 1].tolist()]
-            img_ = draw_bounding_boxes(img, boxes, labels)
-            img_.show()
-
-        self.index += 1
         return img, torch.from_numpy(targets)  # pylint: disable=not-callable
 
 
 def collate_fn(batch):
     imgs, targets = zip(*batch)
-    imgs = [ToTensor()(img) for img in imgs]
+    imgs = [to_tensor(img) for img in imgs]
     imgs = torch.stack(imgs, dim=0)
     for idx, target in enumerate(targets):
         target[:, 0] = idx
