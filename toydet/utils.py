@@ -1,7 +1,10 @@
+import logging
 from typing import Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
+from ignite.engine import Engine
+from ignite.utils import setup_logger
 from PIL import Image, ImageDraw, ImageFont
 from torchvision.transforms.functional import to_pil_image
 
@@ -45,3 +48,20 @@ def draw_bounding_boxes(
             draw.text((box[0] + width, box[1]), labels[i], font=font, fill=color)
 
     return image_
+
+
+def create_engine(name, level, filepath, update_fn, *args):
+    # logging setup
+    logging.basicConfig(level=level, format="[%(levelname)s] %(name)s %(message)s")
+
+    engine = Engine(lambda engine, batch: update_fn(batch, *args))
+
+    # setup logging info
+    engine.logger = setup_logger(
+        name=name,
+        level=level,
+        format="[%(levelname)s] %(name)s %(message)s",
+        filepath=filepath,
+    )
+
+    return engine
