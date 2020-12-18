@@ -41,20 +41,20 @@ def update_fn(batch, net, optimizer, device, split):
     loss_item = {}
     with torch.set_grad_enabled(is_train):
         out1, out2, out3 = net(imgs)
-        loss_1, losses_1_ = yolo_loss(
-            *out1,
+        loss_1, losses_1_, ious_scores_1 = yolo_loss(
+            out1,
             targets,
             net.neck.block1.yolo_layer.stride,
             net.neck.block1.yolo_layer.scaled_anchors,
         )
-        loss_2, losses_2_ = yolo_loss(
-            *out2,
+        loss_2, losses_2_, ious_scores_2 = yolo_loss(
+            out2,
             targets,
             net.neck.block2.yolo_layer.stride,
             net.neck.block2.yolo_layer.scaled_anchors,
         )
-        loss_3, losses_3_ = yolo_loss(
-            *out3,
+        loss_3, losses_3_, ious_scores_3 = yolo_loss(
+            out3,
             targets,
             net.neck.block3.yolo_layer.stride,
             net.neck.block3.yolo_layer.scaled_anchors,
@@ -65,26 +65,61 @@ def update_fn(batch, net, optimizer, device, split):
             net.neck.block2.yolo_layer.stride,
             net.neck.block3.yolo_layer.stride,
         )
-        loss_item["loss_xy"] = (
+        loss_item["loss_x"] = (
             loss_1[0].detach().cpu().item(),
             loss_2[0].detach().cpu().item(),
             loss_3[0].detach().cpu().item(),
         )
-        loss_item["loss_wh"] = (
+        loss_item["loss_y"] = (
             loss_1[1].detach().cpu().item(),
             loss_2[1].detach().cpu().item(),
             loss_3[1].detach().cpu().item(),
         )
-        loss_item["loss_cls"] = (
+        loss_item["loss_w"] = (
             loss_1[2].detach().cpu().item(),
             loss_2[2].detach().cpu().item(),
             loss_3[2].detach().cpu().item(),
         )
-        loss_item["loss_conf"] = (
+        loss_item["loss_h"] = (
             loss_1[3].detach().cpu().item(),
             loss_2[3].detach().cpu().item(),
             loss_3[3].detach().cpu().item(),
         )
+        loss_item["loss_cls"] = (
+            loss_1[4].detach().cpu().item(),
+            loss_2[4].detach().cpu().item(),
+            loss_3[4].detach().cpu().item(),
+        )
+        loss_item["loss_conf"] = (
+            loss_1[5].detach().cpu().item(),
+            loss_2[5].detach().cpu().item(),
+            loss_3[5].detach().cpu().item(),
+        )
+        # loss_item["ious"] = (
+        #     ious_scores_1.detach().cpu().item(),
+        #     ious_scores_2.detach().cpu().item(),
+        #     ious_scores_3.detach().cpu().item(),
+        # )
+        # loss_item["loss_xy"] = (
+        #     loss_1[0].detach().cpu().item(),
+        #     loss_2[0].detach().cpu().item(),
+        #     loss_3[0].detach().cpu().item(),
+        # )
+        # loss_item["loss_wh"] = (
+        #     loss_1[1].detach().cpu().item(),
+        #     loss_2[1].detach().cpu().item(),
+        #     loss_3[1].detach().cpu().item(),
+        # )
+        # loss_item["loss_cls"] = (
+        #     loss_1[2].detach().cpu().item(),
+        #     loss_2[2].detach().cpu().item(),
+        #     loss_3[2].detach().cpu().item(),
+        # )
+        # loss_item["loss_conf"] = (
+        #     loss_1[3].detach().cpu().item(),
+        #     loss_2[3].detach().cpu().item(),
+        #     loss_3[3].detach().cpu().item(),
+        # )
         loss_item["losses"] = losses.detach().cpu().item()
 
     if is_train:
@@ -101,22 +136,22 @@ def show_metrics(engine):
     ptable.add_row(
         ["grid_size", output["stride"][0], output["stride"][1], output["stride"][2]]
     )
-    ptable.add_row(
-        [
-            "loss_xy",
-            output["loss_xy"][0],
-            output["loss_xy"][1],
-            output["loss_xy"][2],
-        ]
-    )
-    ptable.add_row(
-        [
-            "loss_wh",
-            output["loss_wh"][0],
-            output["loss_wh"][1],
-            output["loss_wh"][2],
-        ]
-    )
+    # ptable.add_row(
+    #     [
+    #         "loss_xy",
+    #         output["loss_xy"][0],
+    #         output["loss_xy"][1],
+    #         output["loss_xy"][2],
+    #     ]
+    # )
+    # ptable.add_row(
+    #     [
+    #         "loss_wh",
+    #         output["loss_wh"][0],
+    #         output["loss_wh"][1],
+    #         output["loss_wh"][2],
+    #     ]
+    # )
     ptable.add_row(
         [
             "loss_cls",
@@ -133,6 +168,46 @@ def show_metrics(engine):
             output["loss_conf"][2],
         ]
     )
+    ptable.add_row(
+        [
+            "loss_x",
+            output["loss_x"][0],
+            output["loss_x"][1],
+            output["loss_x"][2],
+        ]
+    )
+    ptable.add_row(
+        [
+            "loss_y",
+            output["loss_y"][0],
+            output["loss_y"][1],
+            output["loss_y"][2],
+        ]
+    )
+    ptable.add_row(
+        [
+            "loss_w",
+            output["loss_w"][0],
+            output["loss_w"][1],
+            output["loss_w"][2],
+        ]
+    )
+    ptable.add_row(
+        [
+            "loss_h",
+            output["loss_h"][0],
+            output["loss_h"][1],
+            output["loss_h"][2],
+        ]
+    )
+    # ptable.add_row(
+    #     [
+    #         "ious",
+    #         output["ious"][0],
+    #         output["ious"][1],
+    #         output["ious"][2],
+    #     ]
+    # )
     engine.logger.info(
         "Epoch %i : Iteration %i" % (engine.state.epoch, engine.state.iteration)
     )
@@ -209,7 +284,7 @@ if __name__ == "__main__":
     transforms = MultiArgsSequential(LetterBox(416))
 
     parser = ArgumentParser(description="YOLOv3 Training script")
-    parser.add_argument("--batch_size", type=int, default=16, help="batch size")
+    parser.add_argument("--batch_size", type=int, default=4, help="batch size")
     parser.add_argument("--lr", type=float, default=1e-3, help="learning rate")
     parser.add_argument("--img_size", type=int, default=416, help="image size")
     parser.add_argument("--num_classes", type=int, default=20, help="number of classes")

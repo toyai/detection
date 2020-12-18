@@ -195,14 +195,14 @@ class YOLOLayer(nn.Module):
 
         # B - batch_size, A - num_anchors, C - num_classes, H - height, W - width
         # (B, A, C + 5, H, W)
-        # cx, cy - center x, center y
-        # cx, cy are relative values meaning they are between 0 and 1
-        # w, h can be greater than 0
         pred = inputs.reshape(
             batch_size, self.num_anchors, self.num_classes + 5, grid_size, grid_size
         ).contiguous()
 
-        # still relative values, sigmoid(txty) from paper
+        # cx, cy - center x, center y
+        # cx, cy are relative values meaning they are between 0 and 1
+        # w, h can be greater than 1
+        # make into relative values, sigmoid(txty) from paper
         pred[:, :, :2, :, :] = torch.sigmoid(pred[:, :, :2, :, :])
 
         if self.grid_size != grid_size:
@@ -212,8 +212,8 @@ class YOLOLayer(nn.Module):
             )
 
         # if self.training:
-        # cxcywh, confidence, class
-        return torch.split(pred, (4, 1, 20), dim=2)
+        # cx, cy, w, h, confidence, class
+        return torch.split(pred, (1, 1, 1, 1, 1, 20), dim=2)
 
         # cxcy, wh, pred_conf, pred_cls = torch.split(pred, (2, 2, 1, 20), dim=2)
 
