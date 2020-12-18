@@ -37,6 +37,7 @@ def load_datasets(batch_size, split, transforms):
 def update_fn(batch, net, optimizer, device, split):
     is_train = split == "train"
     net.train(is_train)
+    net.to(device)
     imgs, targets = batch[0].to(device), batch[1].to(device)
     loss_item = {}
     with torch.set_grad_enabled(is_train):
