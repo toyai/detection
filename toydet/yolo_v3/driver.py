@@ -42,84 +42,59 @@ def update_fn(batch, net, optimizer, device, split):
     loss_item = {}
     with torch.set_grad_enabled(is_train):
         out1, out2, out3 = net(imgs)
-        loss_1, losses_1_, ious_scores_1 = yolo_loss(
+        loss_xywh_1, loss_conf_1, loss_cls_1 = yolo_loss(
             out1,
             targets,
             net.neck.block1.yolo_layer.stride,
             net.neck.block1.yolo_layer.scaled_anchors,
         )
-        loss_2, losses_2_, ious_scores_2 = yolo_loss(
+        loss_xywh_2, loss_conf_2, loss_cls_2 = yolo_loss(
             out2,
             targets,
             net.neck.block2.yolo_layer.stride,
             net.neck.block2.yolo_layer.scaled_anchors,
         )
-        loss_3, losses_3_, ious_scores_3 = yolo_loss(
+        loss_xywh_3, loss_conf_3, loss_cls_3 = yolo_loss(
             out3,
             targets,
             net.neck.block3.yolo_layer.stride,
             net.neck.block3.yolo_layer.scaled_anchors,
         )
-        losses = losses_1_ + losses_2_ + losses_3_
+        losses = (
+            loss_xywh_1
+            + loss_conf_1
+            + loss_cls_1
+            + loss_xywh_2
+            + loss_conf_2
+            + loss_cls_2
+            + loss_xywh_3
+            + loss_conf_3
+            + loss_cls_3
+        )
         loss_item["stride"] = (
             net.neck.block1.yolo_layer.stride,
             net.neck.block2.yolo_layer.stride,
             net.neck.block3.yolo_layer.stride,
         )
-        loss_item["loss_x"] = (
-            loss_1[0].detach().cpu().item(),
-            loss_2[0].detach().cpu().item(),
-            loss_3[0].detach().cpu().item(),
-        )
-        loss_item["loss_y"] = (
-            loss_1[1].detach().cpu().item(),
-            loss_2[1].detach().cpu().item(),
-            loss_3[1].detach().cpu().item(),
-        )
-        loss_item["loss_w"] = (
-            loss_1[2].detach().cpu().item(),
-            loss_2[2].detach().cpu().item(),
-            loss_3[2].detach().cpu().item(),
-        )
-        loss_item["loss_h"] = (
-            loss_1[3].detach().cpu().item(),
-            loss_2[3].detach().cpu().item(),
-            loss_3[3].detach().cpu().item(),
+        loss_item["loss_xywh"] = (
+            loss_xywh_1.detach().cpu().item(),
+            loss_xywh_2.detach().cpu().item(),
+            loss_xywh_3.detach().cpu().item(),
         )
         loss_item["loss_cls"] = (
-            loss_1[4].detach().cpu().item(),
-            loss_2[4].detach().cpu().item(),
-            loss_3[4].detach().cpu().item(),
+            loss_cls_1.detach().cpu().item(),
+            loss_cls_2.detach().cpu().item(),
+            loss_cls_3.detach().cpu().item(),
         )
         loss_item["loss_conf"] = (
-            loss_1[5].detach().cpu().item(),
-            loss_2[5].detach().cpu().item(),
-            loss_3[5].detach().cpu().item(),
+            loss_conf_1.detach().cpu().item(),
+            loss_conf_2.detach().cpu().item(),
+            loss_conf_3.detach().cpu().item(),
         )
         # loss_item["ious"] = (
         #     ious_scores_1.detach().cpu().item(),
         #     ious_scores_2.detach().cpu().item(),
         #     ious_scores_3.detach().cpu().item(),
-        # )
-        # loss_item["loss_xy"] = (
-        #     loss_1[0].detach().cpu().item(),
-        #     loss_2[0].detach().cpu().item(),
-        #     loss_3[0].detach().cpu().item(),
-        # )
-        # loss_item["loss_wh"] = (
-        #     loss_1[1].detach().cpu().item(),
-        #     loss_2[1].detach().cpu().item(),
-        #     loss_3[1].detach().cpu().item(),
-        # )
-        # loss_item["loss_cls"] = (
-        #     loss_1[2].detach().cpu().item(),
-        #     loss_2[2].detach().cpu().item(),
-        #     loss_3[2].detach().cpu().item(),
-        # )
-        # loss_item["loss_conf"] = (
-        #     loss_1[3].detach().cpu().item(),
-        #     loss_2[3].detach().cpu().item(),
-        #     loss_3[3].detach().cpu().item(),
         # )
         loss_item["losses"] = losses.detach().cpu().item()
 
@@ -137,22 +112,14 @@ def show_metrics(engine):
     ptable.add_row(
         ["grid_size", output["stride"][0], output["stride"][1], output["stride"][2]]
     )
-    # ptable.add_row(
-    #     [
-    #         "loss_xy",
-    #         output["loss_xy"][0],
-    #         output["loss_xy"][1],
-    #         output["loss_xy"][2],
-    #     ]
-    # )
-    # ptable.add_row(
-    #     [
-    #         "loss_wh",
-    #         output["loss_wh"][0],
-    #         output["loss_wh"][1],
-    #         output["loss_wh"][2],
-    #     ]
-    # )
+    ptable.add_row(
+        [
+            "loss_xywh",
+            output["loss_xywh"][0],
+            output["loss_xywh"][1],
+            output["loss_xywh"][2],
+        ]
+    )
     ptable.add_row(
         [
             "loss_cls",
@@ -167,38 +134,6 @@ def show_metrics(engine):
             output["loss_conf"][0],
             output["loss_conf"][1],
             output["loss_conf"][2],
-        ]
-    )
-    ptable.add_row(
-        [
-            "loss_x",
-            output["loss_x"][0],
-            output["loss_x"][1],
-            output["loss_x"][2],
-        ]
-    )
-    ptable.add_row(
-        [
-            "loss_y",
-            output["loss_y"][0],
-            output["loss_y"][1],
-            output["loss_y"][2],
-        ]
-    )
-    ptable.add_row(
-        [
-            "loss_w",
-            output["loss_w"][0],
-            output["loss_w"][1],
-            output["loss_w"][2],
-        ]
-    )
-    ptable.add_row(
-        [
-            "loss_h",
-            output["loss_h"][0],
-            output["loss_h"][1],
-            output["loss_h"][2],
         ]
     )
     # ptable.add_row(

@@ -213,7 +213,7 @@ class YOLOLayer(nn.Module):
 
         # if self.training:
         # cx, cy, w, h, confidence, class
-        return torch.split(pred, (1, 1, 1, 1, 1, 20), dim=2)
+        return torch.split(pred, (4, 1, 20), dim=2)
 
         # cxcy, wh, pred_conf, pred_cls = torch.split(pred, (2, 2, 1, 20), dim=2)
 
