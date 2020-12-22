@@ -7,13 +7,13 @@ from typing import Union
 
 import ignite.distributed as idist
 import torch
-from ignite.engine import Events
-from ignite.utils import manual_seed
+from ignite.engine import Engine, Events
+from ignite.utils import manual_seed, setup_logger
 from prettytable import PrettyTable
 from torch.utils.data import DataLoader
 
 from toydet.transforms import LetterBox, MultiArgsSequential
-from toydet.utils import create_engine
+from toydet.utils import cuda_info, mem_info
 from toydet.yolo_v3.model import YOLOv3
 from toydet.yolo_v3.utils import yolo_loss
 from toydet.yolo_v3.voc import VOCDetection_, collate_fn
@@ -99,14 +99,14 @@ def update_fn(batch, net, optimizer, device, split):
         loss_item["losses"] = losses.detach().cpu().item()
 
     if is_train:
-        optimizer.zero_grad()
         losses.backward()
         optimizer.step()
+        optimizer.zero_grad()
 
     return loss_item
 
 
-def show_metrics(engine):
+def show_metrics(engine, logger, split):
     ptable = PrettyTable(["Metrics", "YOLOLayer 1", "YOLOLayer 2", "YOLOLayer 3"])
     output = engine.state.output
     ptable.add_row(
@@ -144,11 +144,12 @@ def show_metrics(engine):
     #         output["ious"][2],
     #     ]
     # )
-    engine.logger.info(
-        "Epoch %i : Iteration %i" % (engine.state.epoch, engine.state.iteration)
+    logger.info(
+        "%s Epoch %i - Iteration %i"
+        % (split, engine.state.epoch, engine.state.iteration)
     )
-    engine.logger.info("Results\n%s", ptable)
-    engine.logger.info("Total losses: %f", output["losses"])
+    logger.info("%s Results\n%s" % (split, ptable))
+    logger.info("%s Total losses - %f" % (split, output["losses"]))
 
 
 def run(config):
@@ -161,33 +162,26 @@ def run(config):
     else:
         config.verbose = logging.WARNING
 
-    train_engine = create_engine(
-        "Training",
-        config.verbose,
-        config.filepath,
-        update_fn,
-        net,
-        optimizer,
-        device,
-        "train",
+    logger = setup_logger(level=config.verbose, filepath=config.filepath)
+    train_engine = Engine(
+        lambda engine, batch: update_fn(batch, net, optimizer, device, "train")
     )
-    val_engine = create_engine(
-        "Validation",
-        config.verbose,
-        config.filepath,
-        update_fn,
-        net,
-        optimizer,
-        device,
-        "val",
+    val_engine = Engine(
+        lambda engine, batch: update_fn(batch, net, optimizer, device, "val")
     )
 
     # fire logging event at the end of specified training batches and val epoch
     train_engine.add_event_handler(
-        Events.ITERATION_COMPLETED(every=config.log_every_train_iter), show_metrics
+        Events.ITERATION_COMPLETED(every=config.log_every_train_iter),
+        show_metrics,
+        logger=logger,
+        split="Training",
     )
     val_engine.add_event_handler(
-        Events.EPOCH_COMPLETED(every=config.log_every_val_epoch), show_metrics
+        Events.EPOCH_COMPLETED(every=config.log_every_val_epoch),
+        show_metrics,
+        logger=logger,
+        split="Validation",
     )
 
     # run val_engine before training and at the end of each training epoch
@@ -211,9 +205,14 @@ def run(config):
         Events.EPOCH_COMPLETED, lambda _: val_engine.run(val_dl, max_epochs=1)
     )
 
-    train_engine.logger.info("Using %s ...", device)
+    logger.info("Running on %s ...", device)
+    logger.info("Configs %s", config)
+    if "cuda" in device.type:
+        name = cuda_info(logger, device)
     # run the training
     train_engine.run(train_dl, max_epochs=config.max_epochs)
+    if "cuda" in device.type:
+        mem_info(logger, device, name)
 
 
 if __name__ == "__main__":

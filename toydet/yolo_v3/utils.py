@@ -45,9 +45,15 @@ def yolo_loss(pred, target: Tensor, stride, anchors):
         pred, target, stride, anchors
     )
 
-    loss_xywh = F.mse_loss(pred_bbox * obj_mask, target_bbox)
+    loss_xywh = F.mse_loss(
+        torch.masked_select(pred_bbox, obj_mask),
+        torch.masked_select(target_bbox, obj_mask),
+    )
     loss_cls = F.cross_entropy(pred_cls.permute(0, 2, 1, 3, 4), target_cls)
-    loss_conf = F.binary_cross_entropy_with_logits(pred_conf * obj_mask, target_conf)
+    loss_conf = F.binary_cross_entropy_with_logits(
+        torch.masked_select(pred_conf, obj_mask),
+        torch.masked_select(target_conf, obj_mask),
+    )
 
     return loss_xywh, loss_conf, loss_cls
 
@@ -64,7 +70,7 @@ def build_targets(pred, target: Tensor, stride, anchors):
     )
 
     # ious_scores = torch.zeros_like(pred_cls, device=pred_cls.device)
-    obj_mask = torch.zeros_like(pred_conf, device=pred_conf.device, dtype=torch.long)
+    obj_mask = torch.zeros_like(pred_conf, device=pred_conf.device, dtype=torch.bool)
 
     target_ = target.clone()
     target_[:, 2:6] = box_convert(target[:, 2:6], "xyxy", "cxcywh") / stride

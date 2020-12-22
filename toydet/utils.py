@@ -1,10 +1,9 @@
-import logging
+import os
+from logging import Logger
 from typing import Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
-from ignite.engine import Engine
-from ignite.utils import setup_logger
 from PIL import Image, ImageDraw, ImageFont
 from torchvision.transforms.functional import to_pil_image
 
@@ -50,18 +49,27 @@ def draw_bounding_boxes(
     return image_
 
 
-def create_engine(name, level, filepath, update_fn, *args):
-    # logging setup
-    logging.basicConfig(level=level, format="[%(levelname)s] %(name)s %(message)s")
-
-    engine = Engine(lambda engine, batch: update_fn(batch, *args))
-
-    # setup logging info
-    engine.logger = setup_logger(
-        name=name,
-        level=level,
-        format="[%(levelname)s] %(name)s %(message)s",
-        filepath=filepath,
+def cuda_info(logger: Logger, device: torch.device):
+    devices = torch.cuda.device_count()
+    devices = os.getenv(
+        "CUDA_VISIBLE_DEVICES", ",".join([str(i) for i in range(devices)])
     )
+    logger.info("CUDA_VISIBLE_DEVICES - %s", devices)
+    prop = torch.cuda.get_device_properties(device=device)
+    logger.info("%s - %s" % (prop, device))
 
-    return engine
+    return prop.name
+
+
+def mem_info(logger: Logger, device: torch.device, name: str):
+    logger.info(
+        "%s allocated %s GB" % (name, torch.cuda.memory_allocated(device) * 1e-9)
+    )
+    logger.info(
+        "%s allocated max %s GB"
+        % (name, torch.cuda.max_memory_allocated(device) * 1e-9)
+    )
+    logger.info("%s reserved %s GB" % (name, torch.cuda.memory_reserved(device) * 1e-9))
+    logger.info(
+        "%s reserved max %s GB" % (name, torch.cuda.max_memory_reserved(device) * 1e-9)
+    )
