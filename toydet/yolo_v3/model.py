@@ -60,7 +60,7 @@ class ConvBN(nn.Module):
             **conv_kwargs,
         )
         self.norm = norm_layer or nn.BatchNorm2d(out_channels)
-        self.activation = activation_layer or nn.LeakyReLU(0.1)
+        self.activation = activation_layer or nn.LeakyReLU(0.1, inplace=True)
 
     def forward(self, inputs: Tensor) -> Tensor:
         """
@@ -190,13 +190,12 @@ class YOLOLayer(nn.Module):
         if inputs.size(2) != inputs.size(3):
             raise ValueError("image must have same height and width.")
 
-        batch_size = inputs.size(0)
         grid_size = inputs.size(2)  # 13x13, 26x26, 52x52
 
         # B - batch_size, A - num_anchors, C - num_classes, H - height, W - width
         # (B, A, C + 5, H, W)
         pred = inputs.reshape(
-            batch_size, self.num_anchors, self.num_classes + 5, grid_size, grid_size
+            -1, self.num_anchors, self.num_classes + 5, grid_size, grid_size
         ).contiguous()
 
         # cx, cy - center x, center y
