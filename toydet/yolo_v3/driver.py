@@ -197,13 +197,22 @@ def run(config):
             lambda _: val_engine.run(val_dl, max_epochs=1, epoch_length=epoch_len),
         )
 
-    # create dataloaders
-    train_dl = load_datasets(config.batch_size, "train", config.transforms)
-    val_dl = load_datasets(config.batch_size, "val", config.transforms)
+    if config.overfit_batches:
+        train_dl = load_datasets(config.batch_size, "train", config.transforms)
+        train_engine.add_event_handler(
+            Events.EPOCH_COMPLETED,
+            lambda _: val_engine.run(
+                train_dl, max_epochs=1, epoch_length=config.overfit_batches
+            ),
+        )
+    else:
+        # create dataloaders
+        train_dl = load_datasets(config.batch_size, "train", config.transforms)
+        val_dl = load_datasets(config.batch_size, "val", config.transforms)
 
-    train_engine.add_event_handler(
-        Events.EPOCH_COMPLETED, lambda _: val_engine.run(val_dl, max_epochs=1)
-    )
+        train_engine.add_event_handler(
+            Events.EPOCH_COMPLETED, lambda _: val_engine.run(val_dl, max_epochs=1)
+        )
 
     logger.info("Running on %s ...", device)
     logger.info("Configs %s", config)
@@ -231,7 +240,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--log_every_train_iter",
         type=int,
-        default=100,
+        default=50,
         help="log at every n training iteration completed",
     )
     parser.add_argument(
@@ -247,12 +256,12 @@ if __name__ == "__main__":
         default=2,
         help="amount of batches to sanity check",
     )
-    # parser.add_argument(
-    #     "--overfit_batches",
-    #     type=Union[int, float],
-    #     default=0,
-    #     help="overfit the batches",
-    # )
+    parser.add_argument(
+        "--overfit_batches",
+        type=int,
+        default=0,
+        help="overfit the batches",
+    )
 
     config = parser.parse_args()
     config.transforms = transforms
