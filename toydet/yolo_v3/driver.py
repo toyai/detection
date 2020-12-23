@@ -21,13 +21,13 @@ from toydet.yolo_v3.voc import VOCDetection_, collate_fn
 manual_seed(666)
 
 
-def load_datasets(batch_size, split, transforms):
+def load_datasets(batch_size, split, transforms, overfit=False):
     is_train = split == "train"
     ds = VOCDetection_(image_set=split, transforms=transforms)
     return DataLoader(
         ds,
         batch_size=batch_size,
-        shuffle=is_train,
+        shuffle=is_train and not overfit,
         collate_fn=collate_fn,
         num_workers=cpu_count(),
         pin_memory=torch.cuda.is_available(),
@@ -198,7 +198,8 @@ def run(config):
         )
 
     if config.overfit_batches:
-        train_dl = load_datasets(config.batch_size, "train", config.transforms)
+        train_dl = load_datasets(config.batch_size, "train", config.transforms, True)
+        logger.info("train_dl loaded with overfit %i batches", config.overfit_batches)
         train_engine.add_event_handler(
             Events.EPOCH_COMPLETED,
             lambda _: val_engine.run(
