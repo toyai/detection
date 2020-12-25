@@ -124,7 +124,7 @@ def plot_transformed_imgs(engine):
                         "minY": t[4].item(),
                         "maxY": t[5].item(),
                     },
-                    "class_id": t[1].item(),
+                    "class_id": int(t[1].item()),
                 }
             )
         boxes = {
@@ -154,6 +154,7 @@ if config.wandb:
     # wandb logger
     # --------------
     wb_logger = WandBLogger(config=config, name=config.model_name, project="yolov3")
+    wb_logger.watch(net, log="all")
 
     # --------------------------
     # logging training metrics
