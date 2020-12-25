@@ -381,3 +381,12 @@ class YOLOv3(nn.Module):
         out1, out2, out3 = self.neck(output_52, output_26, output_13)
 
         return out1, out2, out3
+
+
+def yolov3_darknet53_voc(
+    img_size: int = 416,
+    num_classes: int = 20,
+    pretrained: bool = False,
+):
+    net = YOLOv3(img_size=img_size, num_classes=num_classes)
+    return net

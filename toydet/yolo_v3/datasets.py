@@ -2,8 +2,10 @@
 
 import os
 import xml.etree.ElementTree as ET
+from multiprocessing import cpu_count
 from typing import Callable, List, Optional, Tuple
 
+import ignite.distributed as idist
 import numpy as np
 import torch
 from PIL import Image
@@ -76,9 +78,9 @@ class VOCDetection_(VOCDetection):
 
         targets = np.array(targets, dtype=np.float32)
         if self.transforms:
-            bboxes = targets[:, 2:]
+            bboxes = targets[..., 2:]
             img, bboxes = self.transforms(img, target=bboxes)
-            targets[:, 2:] = bboxes
+            targets[..., 2:] = bboxes
 
         return img, torch.from_numpy(targets)  # pylint: disable=not-callable
 
@@ -91,3 +93,16 @@ def collate_fn(batch):
         target[:, 0] = idx
 
     return imgs, torch.cat(targets, dim=0)
+
+
+def get_dataloader(dataset, batch_size, split, transforms, overfit=False):
+    is_train = split == "train"
+    ds = dataset(image_set=split, transforms=transforms)
+    return idist.auto_dataloader(
+        ds,
+        batch_size=batch_size,
+        shuffle=is_train and not overfit,
+        collate_fn=collate_fn,
+        num_workers=cpu_count(),
+        pin_memory=torch.cuda.is_available(),
+    )

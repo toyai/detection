@@ -9,7 +9,7 @@ def letter_box(img, target, size):
 
     Args:
         img (PIL Image): Image to be transformed.
-        target (np.ndarray or Tensor): bounding box target to be transformed.
+        target (np.ndarray or Tensor): bounding box target to be transformed (xyxy).
         size (int or tuple of int): the size of the transformed image.
 
     Returns:
@@ -31,14 +31,14 @@ def letter_box(img, target, size):
     img = T.functional.pad(img, padding, 255 // 2)
 
     if isinstance(target, torch.Tensor):
-        target[:, 0] = torch.round(ratio * target[:, 0]) + left
-        target[:, 1] = torch.round(ratio * target[:, 1]) + top
-        target[:, 2] = torch.round(ratio * target[:, 2]) + right
-        target[:, 3] = torch.round(ratio * target[:, 3]) + bottom
+        target[..., 0] = torch.round(ratio * target[..., 0]) + left
+        target[..., 1] = torch.round(ratio * target[..., 1]) + top
+        target[..., 2] = torch.round(ratio * target[..., 2]) + right
+        target[..., 3] = torch.round(ratio * target[..., 3]) + bottom
     elif isinstance(target, np.ndarray):
-        target[:, 0] = np.rint(ratio * target[:, 0]) + left
-        target[:, 1] = np.rint(ratio * target[:, 1]) + top
-        target[:, 2] = np.rint(ratio * target[:, 2]) + right
-        target[:, 3] = np.rint(ratio * target[:, 3]) + bottom
+        target[..., 0] = np.rint(ratio * target[..., 0]) + left
+        target[..., 1] = np.rint(ratio * target[..., 1]) + top
+        target[..., 2] = np.rint(ratio * target[..., 2]) + right
+        target[..., 3] = np.rint(ratio * target[..., 3]) + bottom
 
     return img, target

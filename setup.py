@@ -32,8 +32,9 @@ install_requires = [
     "torch>=1.7.0",
     "torchvision>=0.8.1",
     "pytorch-ignite>=0.4.2",
-    "prettytable>=2.0.0",
-    "albumentations>=0.5.2",
+    # "prettytable>=2.0.0",
+    "wandb>=0.10.0",
+    # "albumentations>=0.5.2",
 ]
 
 extra["testing"] = ["coverage>=5.3", "parameterized>=0.7.4"]

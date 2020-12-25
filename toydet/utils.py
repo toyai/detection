@@ -18,7 +18,7 @@ def draw_bounding_boxes(
     colors: Optional[Tuple[int, int, int]] = None,
     width: int = 1,
     font: Optional[str] = None,
-    font_size: int = 8,
+    font_size: int = 10,
 ) -> Image:
 
     if isinstance(image, torch.Tensor):
@@ -31,8 +31,8 @@ def draw_bounding_boxes(
     elif isinstance(boxes, np.ndarray):
         boxes = boxes.tolist()
 
-    image_ = image.copy()
-    draw = ImageDraw.Draw(image_)
+    # image_ = image.copy()
+    draw = ImageDraw.Draw(image)
     font = (
         ImageFont.load_default()
         if font is None
@@ -44,9 +44,20 @@ def draw_bounding_boxes(
         draw.rectangle(box, outline=color, width=width)
 
         if labels is not None:
-            draw.text((box[0] + width, box[1]), labels[i], font=font, fill=color)
+            if box[2] < box[0] and box[3] > box[1]:
+                xy = box[2] + 1, box[1]
+            elif box[2] < box[0] and box[3] < box[1]:
+                xy = box[2] + 1, box[3]
+            elif box[2] > box[0] and box[3] < box[1]:
+                xy = box[0] + 1, box[3]
+            else:
+                xy = box[0] + 1, box[1]
 
-    return image_
+            text_width, text_height = font.getsize(labels[i])
+            draw.rectangle((xy, (xy[0] + text_width, xy[1] + text_height)), fill=color)
+            draw.text(xy, labels[i], fill="white", font=font)
+
+    return image
 
 
 def cuda_info(logger: Logger, device: torch.device):
@@ -62,14 +73,13 @@ def cuda_info(logger: Logger, device: torch.device):
 
 
 def mem_info(logger: Logger, device: torch.device, name: str):
-    logger.info(
-        "%s allocated %s GB" % (name, torch.cuda.memory_allocated(device) * 1e-9)
-    )
+    MB = 1024.0 * 1024.0
+    logger.info("%s allocated %s GB" % (name, torch.cuda.memory_allocated(device) / MB))
     logger.info(
         "%s allocated max %s GB"
         % (name, torch.cuda.max_memory_allocated(device) * 1e-9)
     )
-    logger.info("%s reserved %s GB" % (name, torch.cuda.memory_reserved(device) * 1e-9))
+    logger.info("%s reserved %s GB" % (name, torch.cuda.memory_reserved(device) / MB))
     logger.info(
-        "%s reserved max %s GB" % (name, torch.cuda.max_memory_reserved(device) * 1e-9)
+        "%s reserved max %s GB" % (name, torch.cuda.max_memory_reserved(device) / MB)
     )

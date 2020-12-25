@@ -1,1 +1,6 @@
-from toydet.transforms.transforms import LetterBox, MultiArgsSequential  # noqa: F401
+from toydet.transforms.transforms import (  # noqa: F401
+    LetterBox,
+    MultiArgsSequential,
+    RandomHorizontalFlip_,
+    RandomVerticalFlip_,
+)

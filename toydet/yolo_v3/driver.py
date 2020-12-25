@@ -10,7 +10,6 @@ import torch
 from ignite.engine import Engine, Events
 from ignite.utils import manual_seed, setup_logger
 from prettytable import PrettyTable
-from torch.utils.data import DataLoader
 
 from toydet.transforms import LetterBox, MultiArgsSequential
 from toydet.utils import cuda_info, mem_info
@@ -24,7 +23,7 @@ manual_seed(666)
 def load_datasets(batch_size, split, transforms, overfit=False):
     is_train = split == "train"
     ds = VOCDetection_(image_set=split, transforms=transforms)
-    return DataLoader(
+    return idist.auto_dataloader(
         ds,
         batch_size=batch_size,
         shuffle=is_train and not overfit,
