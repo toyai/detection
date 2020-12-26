@@ -44,15 +44,7 @@ def draw_bounding_boxes(
         draw.rectangle(box, outline=color, width=width)
 
         if labels is not None:
-            if box[2] < box[0] and box[3] > box[1]:
-                xy = box[2] + 1, box[1]
-            elif box[2] < box[0] and box[3] < box[1]:
-                xy = box[2] + 1, box[3]
-            elif box[2] > box[0] and box[3] < box[1]:
-                xy = box[0] + 1, box[3]
-            else:
-                xy = box[0] + 1, box[1]
-
+            xy = box[0] + 1, box[1]
             text_width, text_height = font.getsize(labels[i])
             draw.rectangle((xy, (xy[0] + text_width, xy[1] + text_height)), fill=color)
             draw.text(xy, labels[i], fill="white", font=font)
@@ -74,12 +66,12 @@ def cuda_info(logger: Logger, device: torch.device):
 
 def mem_info(logger: Logger, device: torch.device, name: str):
     MB = 1024.0 * 1024.0
-    logger.info("%s allocated %s GB" % (name, torch.cuda.memory_allocated(device) / MB))
+    logger.info("%s allocated %s MB" % (name, torch.cuda.memory_allocated(device) / MB))
     logger.info(
-        "%s allocated max %s GB"
+        "%s allocated max %s MB"
         % (name, torch.cuda.max_memory_allocated(device) * 1e-9)
     )
-    logger.info("%s reserved %s GB" % (name, torch.cuda.memory_reserved(device) / MB))
+    logger.info("%s reserved %s MB" % (name, torch.cuda.memory_reserved(device) / MB))
     logger.info(
-        "%s reserved max %s GB" % (name, torch.cuda.max_memory_reserved(device) / MB)
+        "%s reserved max %s MB" % (name, torch.cuda.max_memory_reserved(device) / MB)
     )

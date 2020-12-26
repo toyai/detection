@@ -53,8 +53,10 @@ class RandomHorizontalFlip_(nn.Module):
     def forward(self, img, target):
         if random.random() < self.prob:
             width = img.width
-            target[..., 0] = width - target[..., 0]
-            target[..., 2] = width - target[..., 2]
+            xmin, xmax = target[..., 0], target[..., 2]
+            diff = abs(xmax - xmin)
+            target[..., 0] = width - xmin - diff
+            target[..., 2] = width - xmax + diff
             return FT.hflip(img), target
         return img, target
 
@@ -69,9 +71,11 @@ class RandomVerticalFlip_(nn.Module):
 
     def forward(self, img, target):
         if random.random() < self.prob:
-            width = img.width
-            target[..., 1] = width - target[..., 1]
-            target[..., 3] = width - target[..., 3]
+            height = img.height
+            ymin, ymax = target[..., 1], target[..., 3]
+            diff = abs(ymax - ymin)
+            target[..., 1] = height - ymin - diff
+            target[..., 3] = height - ymax + diff
             return FT.vflip(img), target
         return img, target
 

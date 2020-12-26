@@ -4,13 +4,14 @@ from datetime import datetime
 from random import randint, randrange
 
 import ignite.distributed as idist
-import wandb
 from ignite.contrib.handlers import WandBLogger
 from ignite.engine import Engine, Events
+from ignite.metrics import RunningAverage
 from ignite.utils import manual_seed, setup_logger
 from torch import optim
 from torchvision.transforms.functional import to_pil_image
 
+import wandb
 from toydet.transforms import (
     LetterBox,
     MultiArgsSequential,
@@ -61,14 +62,16 @@ optimizer = optim.Adam(net.parameters(), lr=config.lr)
 # -----------------------
 # train and eval engine
 # -----------------------
-engine_train = Engine(lambda engine, batch: train_fn(batch, net, optimizer, device))
+engine_train = Engine(
+    lambda engine, batch: train_fn(engine, batch, net, optimizer, device)
+)
 engine_eval = Engine(lambda engine, batch: evaluate_fn(batch, net, optimizer, device))
 
 # --------------------------
 # train and eval transforms
 # --------------------------
 transforms_train = MultiArgsSequential(
-    LetterBox(416), RandomHorizontalFlip_(0.8), RandomVerticalFlip_(0.8)
+    LetterBox(416), RandomHorizontalFlip_(), RandomVerticalFlip_()
 )
 transforms_eval = MultiArgsSequential(LetterBox(416))
 
@@ -108,7 +111,7 @@ else:
 @engine_train.on(Events.ITERATION_STARTED(every=config.log_train))
 def plot_transformed_imgs(engine):
     img, target = engine.state.batch[0], engine.state.batch[1].numpy()
-    idx = randrange(config.batch_size)
+    idx = randrange(len(img))
     img = img[idx]
     mask = target[..., 0] == idx
     target = target[mask]
@@ -116,15 +119,17 @@ def plot_transformed_imgs(engine):
     if config.wandb and config.plot_img:
         box_data = []
         for t in target:
+            class_id = int(t[1].item())
             box_data.append(
                 {
                     "position": {
-                        "minX": t[2].item(),
-                        "maxX": t[3].item(),
-                        "minY": t[4].item(),
-                        "maxY": t[5].item(),
+                        "minX": t[2].item() / img.shape[-1],
+                        "minY": t[3].item() / img.shape[-2],
+                        "maxX": t[4].item() / img.shape[-1],
+                        "maxY": t[5].item() / img.shape[-2],
                     },
-                    "class_id": int(t[1].item()),
+                    "class_id": class_id,
+                    "box_caption": CLASSES[class_id],
                 }
             )
         boxes = {
@@ -133,9 +138,7 @@ def plot_transformed_imgs(engine):
                 "class_labels": {k: v for k, v in enumerate(CLASSES)},
             }
         }
-        wandb.log(
-            {"transforms/imgs": wandb.Image(to_pil_image(img, "RGB"), boxes=boxes)}
-        )
+        wandb.log({"transforms": wandb.Image(to_pil_image(img, "RGB"), boxes=boxes)})
     elif not config.wandb and config.plot_img:
         boxes = target[..., 2:]
         labels = [CLASSES[int(label)] for label in target[..., 1].tolist()]
@@ -147,6 +150,41 @@ def plot_transformed_imgs(engine):
         fig_name = datetime.now().isoformat() + ".png"
         img.save(fig_name, format="png")
         logger.info("Transformed image saved as %s", fig_name)
+
+
+# -------------------------------------
+# attach loss metrics to engine_eval
+# -------------------------------------
+RunningAverage(
+    alpha=1.0, device=device, output_transform=lambda output: output["loss/xywh/0"]
+).attach(engine_eval, "loss/xywh/0")
+RunningAverage(
+    alpha=1.0, device=device, output_transform=lambda output: output["loss/xywh/1"]
+).attach(engine_eval, "loss/xywh/1")
+RunningAverage(
+    alpha=1.0, device=device, output_transform=lambda output: output["loss/xywh/2"]
+).attach(engine_eval, "loss/xywh/2")
+RunningAverage(
+    alpha=1.0, device=device, output_transform=lambda output: output["loss/cls/0"]
+).attach(engine_eval, "loss/cls/0")
+RunningAverage(
+    alpha=1.0, device=device, output_transform=lambda output: output["loss/cls/1"]
+).attach(engine_eval, "loss/cls/1")
+RunningAverage(
+    alpha=1.0, device=device, output_transform=lambda output: output["loss/cls/2"]
+).attach(engine_eval, "loss/cls/2")
+RunningAverage(
+    alpha=1.0, device=device, output_transform=lambda output: output["loss/conf/0"]
+).attach(engine_eval, "loss/conf/0")
+RunningAverage(
+    alpha=1.0, device=device, output_transform=lambda output: output["loss/conf/1"]
+).attach(engine_eval, "loss/conf/1")
+RunningAverage(
+    alpha=1.0, device=device, output_transform=lambda output: output["loss/conf/2"]
+).attach(engine_eval, "loss/conf/2")
+RunningAverage(
+    alpha=1.0, device=device, output_transform=lambda output: output["loss/total"]
+).attach(engine_eval, "loss/total")
 
 
 if config.wandb:
@@ -163,7 +201,7 @@ if config.wandb:
         engine_train,
         Events.ITERATION_COMPLETED(every=config.log_train),
         tag="train",
-        metric_names="all",
+        output_transform=lambda output: output,
     )
 
     # ----------------------------
@@ -174,6 +212,7 @@ if config.wandb:
         Events.EPOCH_COMPLETED(every=config.log_eval),
         tag="eval",
         metric_names="all",
+        global_step_transform=lambda *_: engine_train.state.iteration,
     )
 
 logger.info("Running on %s ...", device)

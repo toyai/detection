@@ -11,7 +11,7 @@ from toydet.yolo_v3.utils import yolo_loss
 # --------------------
 
 
-def train_fn(batch, net, optimizer, device):
+def train_fn(engine, batch, net, optimizer, device):
     net.train(True)
     img, target = batch[0].to(device), batch[1].to(device)
     out1, out2, out3 = net(img)
@@ -45,9 +45,10 @@ def train_fn(batch, net, optimizer, device):
         + loss_cls_3
     )
     loss_item = {
+        "epoch": engine.state.epoch,
         "stride/0": net.neck.block1.yolo_layer.stride,
         "stride/1": net.neck.block2.yolo_layer.stride,
-        "stride/2": net.neck.block2.yolo_layer.stride,
+        "stride/2": net.neck.block3.yolo_layer.stride,
         "loss/xywh/0": loss_xywh_1,
         "loss/xywh/1": loss_xywh_2,
         "loss/xywh/2": loss_xywh_3,
@@ -138,7 +139,7 @@ def evaluate_fn(batch, net, optimizer, device):
     loss_item = {
         "stride/0": net.neck.block1.yolo_layer.stride,
         "stride/1": net.neck.block2.yolo_layer.stride,
-        "stride/2": net.neck.block2.yolo_layer.stride,
+        "stride/2": net.neck.block3.yolo_layer.stride,
         "loss/xywh/0": loss_xywh_1,
         "loss/xywh/1": loss_xywh_2,
         "loss/xywh/2": loss_xywh_3,
