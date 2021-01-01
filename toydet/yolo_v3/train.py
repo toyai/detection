@@ -1,3 +1,4 @@
+import os
 import logging
 from argparse import ArgumentParser
 from datetime import datetime
@@ -11,7 +12,7 @@ from ignite.engine import Engine, Events
 # from ignite.metrics import Loss
 from ignite.utils import manual_seed, setup_logger
 from torch import optim
-from torchvision.ops import box_convert, nms
+from torchvision.ops import box_convert, nms, batched_nms
 from torchvision.transforms.functional import to_pil_image
 
 import wandb
@@ -144,22 +145,25 @@ def train_fn(engine: Engine, batch):
 
 
 @torch.no_grad()
-def evaluate_fn(engine: Engine, batch):
+def evaluate_fn(engine: Engine, batch, conf_threshold: float = 0.5):
     net.eval()
     img, target = batch[0].to(device), batch[1].to(device)
     preds = net(img)
     preds = torch.cat(preds, dim=-1)
+    conf_mask = (preds[:, 4, :] > conf_threshold).float().unsqueeze(1)
+    preds = preds * conf_mask
+    os.makedirs("./predictions", exist_ok=True)
     for i, pred in enumerate(preds):
         pred = pred.t()
         boxes = box_convert(pred[:, :4], "cxcywh", "xyxy")
-        scores = pred[:, 4]
+        scores, idxs = torch.max(pred[:, 5:], 1)
         # idxs = torch.randint(0, 20, (10647,))
-        keep = nms(boxes, scores, 0.5)
+        keep = batched_nms(boxes, scores, idxs, 0.5)
         _, box_idx = torch.max(boxes[keep], 0)
         best_cls, _ = torch.max(pred[:, 5:][keep], 1)
         labels = [CLASSES[int(label)] for label in best_cls.tolist()]
         img_ = draw_bounding_boxes(img[i], boxes[keep][box_idx], labels)
-        img_.save(f"{datetime.now().isoformat()}.png", format="png")
+        img_.save(f"./predictions/{datetime.now().isoformat()}.png", format="png")
     # pred_bbox = box_convert(pred[:, :4, :].reshape(-1, 4), "cxcywh", "xyxy")
     # ious = box_iou(pred_bbox, target[:, 2:6])
     # best_ious, best_n = torch.max(ious, 0)

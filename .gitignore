@@ -135,3 +135,6 @@ VOCdevkit
 
 # logger
 wandb
+
+# output
+predictions
