@@ -159,7 +159,7 @@ def evaluate_fn(engine: Engine, batch):
         best_cls, _ = torch.max(pred[:, 5:][keep], 1)
         labels = [CLASSES[int(label)] for label in best_cls.tolist()]
         img_ = draw_bounding_boxes(img[i], boxes[keep][box_idx], labels)
-        img_.save(f"./predictions/{datetime.now().isoformat()} + .png", format="png")
+        img_.save(f"{datetime.now().isoformat()}.png", format="png")
     # pred_bbox = box_convert(pred[:, :4, :].reshape(-1, 4), "cxcywh", "xyxy")
     # ious = box_iou(pred_bbox, target[:, 2:6])
     # best_ious, best_n = torch.max(ious, 0)
