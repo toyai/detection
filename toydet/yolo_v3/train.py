@@ -152,18 +152,18 @@ def evaluate_fn(engine: Engine, batch, conf_threshold: float = 0.5):
     preds = torch.cat(preds, dim=-1)
     conf_mask = (preds[:, 4, :] > conf_threshold).float().unsqueeze(1)
     preds = preds * conf_mask
-    os.makedirs("./predictions", exist_ok=True)
-    for i, pred in enumerate(preds):
-        pred = pred.t()
-        boxes = box_convert(pred[:, :4], "cxcywh", "xyxy")
-        scores, idxs = torch.max(pred[:, 5:], 1)
-        # idxs = torch.randint(0, 20, (10647,))
-        keep = batched_nms(boxes, scores, idxs, 0.5)
-        _, box_idx = torch.max(boxes[keep], 0)
-        best_cls, _ = torch.max(pred[:, 5:][keep], 1)
-        labels = [CLASSES[int(label)] for label in best_cls.tolist()]
-        img_ = draw_bounding_boxes(img[i], boxes[keep][box_idx], labels)
-        img_.save(f"./predictions/{datetime.now().isoformat()}.png", format="png")
+    # os.makedirs("./predictions", exist_ok=True)
+    # for i, pred in enumerate(preds):
+    #     pred = pred.t()
+    #     boxes = box_convert(pred[:, :4], "cxcywh", "xyxy")
+    #     scores, idxs = torch.max(pred[:, 5:], 1)
+    #     # idxs = torch.randint(0, 20, (10647,))
+    #     keep = batched_nms(boxes, scores, idxs, 0.5)
+    #     _, box_idx = torch.max(boxes[keep], 0)
+    #     best_cls, _ = torch.max(pred[:, 5:][keep], 1)
+    #     labels = [CLASSES[int(label)] for label in best_cls.tolist()]
+    #     img_ = draw_bounding_boxes(img[i], boxes[keep][box_idx], labels)
+    #     img_.save(f"./predictions/{datetime.now().isoformat()}.png", format="png")
     # pred_bbox = box_convert(pred[:, :4, :].reshape(-1, 4), "cxcywh", "xyxy")
     # ious = box_iou(pred_bbox, target[:, 2:6])
     # best_ious, best_n = torch.max(ious, 0)
@@ -173,7 +173,7 @@ def evaluate_fn(engine: Engine, batch, conf_threshold: float = 0.5):
     # labels = [CLASSES[int(label)] for label in best_cls.tolist()]
     # img = draw_bounding_boxes(img.squeeze(0), pred_bbox[best_n], labels)
     # img.show()
-    return pred, target
+    return preds, target
 
 
 # -----------------------
