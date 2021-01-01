@@ -1,5 +1,6 @@
 import os
 from logging import Logger
+from random import randint
 from typing import Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -25,13 +26,14 @@ def draw_bounding_boxes(
         image = to_pil_image(image, "RGB")
     elif isinstance(image, np.ndarray):
         image = Image.fromarray(image, "RGB")
+    elif image.dim() != 3:
+        raise ValueError("Pass individual images, not batches")
 
     if isinstance(boxes, torch.Tensor):
         boxes = boxes.to(torch.int64).tolist()
     elif isinstance(boxes, np.ndarray):
-        boxes = boxes.tolist()
+        boxes = boxes.astype(np.int64).tolist()
 
-    # image_ = image.copy()
     draw = ImageDraw.Draw(image)
     font = (
         ImageFont.load_default()
@@ -39,8 +41,13 @@ def draw_bounding_boxes(
         else ImageFont.truetype(font=font, size=font_size)
     )
 
+    if colors is None:
+        colors = [
+            (randint(0, 200), randint(0, 200), randint(0, 200))
+            for _ in range(len(boxes))
+        ]
     for i, box in enumerate(boxes):
-        color = None if colors is None else colors[i]
+        color = colors[i]
         draw.rectangle(box, outline=color, width=width)
 
         if labels is not None:
@@ -68,8 +75,7 @@ def mem_info(logger: Logger, device: torch.device, name: str):
     MB = 1024.0 * 1024.0
     logger.info("%s allocated %s MB" % (name, torch.cuda.memory_allocated(device) / MB))
     logger.info(
-        "%s allocated max %s MB"
-        % (name, torch.cuda.max_memory_allocated(device) * 1e-9)
+        "%s allocated max %s MB" % (name, torch.cuda.max_memory_allocated(device) / MB)
     )
     logger.info("%s reserved %s MB" % (name, torch.cuda.memory_reserved(device) / MB))
     logger.info(

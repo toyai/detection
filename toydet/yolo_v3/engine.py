@@ -49,46 +49,20 @@ def train_fn(engine, batch, net, optimizer, device):
         "stride/0": net.neck.block1.yolo_layer.stride,
         "stride/1": net.neck.block2.yolo_layer.stride,
         "stride/2": net.neck.block3.yolo_layer.stride,
-        "loss/xywh/0": loss_xywh_1,
-        "loss/xywh/1": loss_xywh_2,
-        "loss/xywh/2": loss_xywh_3,
-        "loss/cls/0": loss_cls_1,
-        "loss/cls/1": loss_cls_2,
-        "loss/cls/2": loss_cls_3,
-        "loss/conf/0": loss_conf_1,
-        "loss/conf/1": loss_conf_2,
-        "loss/conf/2": loss_conf_3,
-        "loss/total": losses,
+        "loss/xywh/0": loss_xywh_1.detach().cpu().item(),
+        "loss/xywh/1": loss_xywh_2.detach().cpu().item(),
+        "loss/xywh/2": loss_xywh_3.detach().cpu().item(),
+        "loss/cls/0": loss_cls_1.detach().cpu().item(),
+        "loss/cls/1": loss_cls_2.detach().cpu().item(),
+        "loss/cls/2": loss_cls_3.detach().cpu().item(),
+        "loss/conf/0": loss_conf_1.detach().cpu().item(),
+        "loss/conf/1": loss_conf_2.detach().cpu().item(),
+        "loss/conf/2": loss_conf_3.detach().cpu().item(),
+        "loss/total": losses.detach().cpu().item(),
         # "ious/0": ious_scores_1,
         # "ious/1": ious_scores_2,
         # "ious/2": ious_scores_3,
     }
-    # loss_item["stride"] = (
-    #     net.neck.block1.yolo_layer.stride,
-    #     net.neck.block2.yolo_layer.stride,
-    #     net.neck.block3.yolo_layer.stride,
-    # )
-    # loss_item["loss_xywh"] = (
-    #     loss_xywh_1.detach().cpu().item(),
-    #     loss_xywh_2.detach().cpu().item(),
-    #     loss_xywh_3.detach().cpu().item(),
-    # )
-    # loss_item["loss_cls"] = (
-    #     loss_cls_1.detach().cpu().item(),
-    #     loss_cls_2.detach().cpu().item(),
-    #     loss_cls_3.detach().cpu().item(),
-    # )
-    # loss_item["loss_conf"] = (
-    #     loss_conf_1.detach().cpu().item(),
-    #     loss_conf_2.detach().cpu().item(),
-    #     loss_conf_3.detach().cpu().item(),
-    # )
-    # loss_item["ious"] = (
-    #     ious_scores_1.detach().cpu().item(),
-    #     ious_scores_2.detach().cpu().item(),
-    #     ious_scores_3.detach().cpu().item(),
-    # )
-    # loss_item["losses"] = losses.detach().cpu().item()
 
     losses.backward()
     optimizer.step()
@@ -154,31 +128,5 @@ def evaluate_fn(batch, net, optimizer, device):
         # "ious/1": ious_scores_2,
         # "ious/2": ious_scores_3,
     }
-    # loss_item["stride"] = (
-    #     net.neck.block1.yolo_layer.stride,
-    #     net.neck.block2.yolo_layer.stride,
-    #     net.neck.block3.yolo_layer.stride,
-    # )
-    # loss_item["loss_xywh"] = (
-    #     loss_xywh_1.detach().cpu().item(),
-    #     loss_xywh_2.detach().cpu().item(),
-    #     loss_xywh_3.detach().cpu().item(),
-    # )
-    # loss_item["loss_cls"] = (
-    #     loss_cls_1.detach().cpu().item(),
-    #     loss_cls_2.detach().cpu().item(),
-    #     loss_cls_3.detach().cpu().item(),
-    # )
-    # loss_item["loss_conf"] = (
-    #     loss_conf_1.detach().cpu().item(),
-    #     loss_conf_2.detach().cpu().item(),
-    #     loss_conf_3.detach().cpu().item(),
-    # )
-    # loss_item["ious"] = (
-    #     ious_scores_1.detach().cpu().item(),
-    #     ious_scores_2.detach().cpu().item(),
-    #     ious_scores_3.detach().cpu().item(),
-    # )
-    # loss_item["losses"] = losses.detach().cpu().item()
 
     return loss_item

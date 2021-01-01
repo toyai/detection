@@ -1,20 +1,20 @@
 """YOLO v3 Models."""
 
 import logging
-from typing import Callable, Dict, Optional, Sequence, Tuple
+from collections import OrderedDict
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor, nn
+
+from toydet.yolo_v3.utils import build_targets, get_abs_yolo_bbox
 
 __all__ = (
     "ANCHORS",
     "ConvBN",
     "ResidualBlock",
-    "BackBone",
     "YOLOLayer",
     "MidBlock",
-    "Neck",
     "YOLOv3",
 )
 
@@ -59,7 +59,7 @@ class ConvBN(nn.Module):
             padding=(kernel_size - 1) // 2,
             **conv_kwargs,
         )
-        self.norm = norm_layer or nn.BatchNorm2d(out_channels)
+        self.norm = norm_layer or nn.BatchNorm2d(out_channels, eps=1e-5, momentum=0.9)
         self.activation = activation_layer or nn.LeakyReLU(0.1, inplace=True)
 
     def forward(self, inputs: Tensor) -> Tensor:
@@ -111,31 +111,35 @@ def _make_residual_layers(in_channels, out_channels, times):
     Returns:
         module_list (nn.Sequential)
     """
-    module_list = [ConvBN(in_channels, out_channels, kernel_size=3, stride=2)]
+    module_list = []
     for _ in range(times):
         module_list.append(ResidualBlock(out_channels))
 
     return nn.Sequential(*module_list)
 
 
-class BackBone(nn.Module):
+class Extractor(nn.Module):
     """
     YOLOv3 BackBone Block.
 
     Returns:
-        output_52, output_26, output_13
+        list: results (52, 26, 13)
     """
 
     def __init__(self) -> None:
         super().__init__()
-        self.convbn = ConvBN(3, 32, kernel_size=3)
-        self.res_block_1x = _make_residual_layers(32, 64, 1)
-        self.res_block_2x = _make_residual_layers(64, 128, 2)
-        self.res_block_8x_1 = _make_residual_layers(128, 256, 8)
-        self.res_block_8x_2 = _make_residual_layers(256, 512, 8)
-        self.res_block_4x = _make_residual_layers(512, 1024, 4)
+        self.module_dict = nn.ModuleDict({"conv_block_0": ConvBN(3, 32, kernel_size=3)})
+        bbs = (32, 64, 128, 256, 512, 1024)
+        times = (1, 2, 8, 8, 4)
+        for i, (bb, time) in enumerate(zip(bbs, times)):
+            self.module_dict[f"conv_block_{i + 1}"] = ConvBN(
+                bb, bbs[i + 1], kernel_size=3, stride=2
+            )
+            self.module_dict[f"res_block_{i + 1}"] = _make_residual_layers(
+                bb, bbs[i + 1], time
+            )
 
-    def forward(self, inputs: Tensor) -> Tuple[Tensor]:
+    def forward(self, inputs: Tensor) -> List[Tensor]:
         """
         YOLOv3 BackBone forward function.
 
@@ -143,14 +147,15 @@ class BackBone(nn.Module):
             inputs (Tensor)
 
         Returns:
-            Tensor: output_52, output_26, output_13
+            list: results (52, 26, 13)
         """
-        inputs = self.res_block_2x(self.res_block_1x(self.convbn(inputs)))
-        output_52 = self.res_block_8x_1(inputs)
-        output_26 = self.res_block_8x_2(output_52)
-        output_13 = self.res_block_4x(output_26)
+        results = []
+        for name, module in self.module_dict.items():
+            inputs = module(inputs)
+            if name in ("res_block_3", "res_block_4", "res_block_5"):
+                results.append(inputs)
 
-        return output_52, output_26, output_13
+        return results
 
 
 class YOLOLayer(nn.Module):
@@ -173,10 +178,13 @@ class YOLOLayer(nn.Module):
         self.num_anchors = len(anchors)
         self.num_classes = num_classes
         self.grid_size = 0
+        self.bce_loss_with_logits = nn.BCEWithLogitsLoss()
+        self.ce_loss = nn.CrossEntropyLoss()
+        self.mse_loss = nn.MSELoss()
+        self.stride = 0
         self.scaled_anchors = ...
-        self.stride = ...
 
-    def forward(self, inputs: Tensor) -> Tensor:
+    def forward(self, inputs: Tensor, target: Tensor = None) -> Tensor:
         """
         YOLOLayer forward function.
 
@@ -190,61 +198,73 @@ class YOLOLayer(nn.Module):
         if inputs.size(2) != inputs.size(3):
             raise ValueError("image must have same height and width.")
 
+        batch_size = inputs.size(0)
         grid_size = inputs.size(2)  # 13x13, 26x26, 52x52
 
         # B - batch_size, A - num_anchors, C - num_classes, H - height, W - width
-        # (B, A, C + 5, H, W)
+        # (B, C + 5, A, H, W)
         pred = inputs.reshape(
-            -1, self.num_anchors, self.num_classes + 5, grid_size, grid_size
+            batch_size, self.num_classes + 5, self.num_anchors, grid_size, grid_size
         ).contiguous()
 
         # cx, cy - center x, center y
         # cx, cy are relative values meaning they are between 0 and 1
         # w, h can be greater than 1
         # make into relative values, sigmoid(txty) from paper
-        pred[:, :, :2, :, :] = torch.sigmoid(pred[:, :, :2, :, :])
+        pred[:, :2, :, :, :] = torch.sigmoid(pred[:, :2, :, :, :])
 
         if self.grid_size != grid_size:
-            logger.info("Recomputing for grid size %s ...", grid_size)
-            grid_xy, grid_wh, self.stride = self.get_grid_offsets(
-                grid_size, device=inputs.device
+            self.grid_size = grid_size
+            self.stride = self.img_size / self.grid_size
+            # pylint: disable=not-callable
+            self.scaled_anchors = torch.tensor(
+                [(w / self.stride, h / self.stride) for (w, h) in self.anchors],
+                device=pred.device,
+            )
+            logger.info(
+                "Recomputing for grid size %i - stride %i ..."
+                % (grid_size, self.stride)
             )
 
-        # if self.training:
-        # cx, cy, w, h, confidence, class
-        return torch.split(pred, (4, 1, 20), dim=2)
+        if self.training:
+            # wh2 = scaled_target[:, 2:]
+            # ious = torch.stack(
+            #     [box_iou_wh(anchor, wh2) for anchor in self.scaled_anchors], dim=0
+            # )
+            # _, idx = torch.max(ious, 0)
+            # pred_bbox, pred_conf, pred_cls = torch.split(
+            #     pred, (4, 1, self.num_classes), dim=1
+            # )
+            # print(get_rel_yolo_bbox(scaled_target, self.scaled_anchors[idx]))
+            # return pred, self.stride, self.scaled_anchors
+            # pred = torch.split(pred, (4, 1, self.num_classes), dim=2)
+            pred, target = build_targets(pred, target, self.stride, self.scaled_anchors)
+            loss_xywh = self.mse_loss(pred["bbox"], target["bbox"])
+            loss_cls = self.ce_loss(pred["cls"], target["cls"])
+            loss_conf = self.bce_loss_with_logits(pred["conf"], target["conf"])
+            losses = loss_cls + loss_conf + loss_xywh
+            # cx, cy, w, h, confidence, class
+            # return torch.split(pred, (4, 1, self.num_classes), dim=2)
+            return {
+                "loss/xywh": loss_xywh.detach().cpu().item(),
+                "loss/cls": loss_cls.detach().cpu().item(),
+                "loss/conf": loss_conf.detach().cpu().item(),
+                "loss/total": losses,
+            }
 
-        # cxcy, wh, pred_conf, pred_cls = torch.split(pred, (2, 2, 1, 20), dim=2)
+        rel_bbox, rel_conf, rel_cls = torch.split(pred, (4, 1, self.num_classes), dim=1)
+        abs_bbox = get_abs_yolo_bbox(rel_bbox, self.scaled_anchors) * self.stride
+        abs_conf = torch.sigmoid(rel_conf)
+        abs_cls = torch.sigmoid(rel_cls)
 
-        # # get absolute values with equation from the paper
-        # abs_cxcy = torch.add(cxcy, grid_xy)
-        # abs_wh = torch.exp(wh) * grid_wh
-        # pred_bbox = torch.cat((abs_cxcy, abs_wh), dim=2)
-
-        # return (
-        #     pred_bbox * self.stride,
-        #     torch.sigmoid(pred_cls),
-        #     torch.sigmoid(pred_conf),
-        # )
-
-    def get_grid_offsets(self, grid_size, device):
-        self.grid_size = grid_size
-        stride = self.img_size / self.grid_size
-        aranged_tensor = torch.arange(grid_size, device=device)
-        # grid_x is increasing values in x-axis
-        # grid_y is increasing values in y-axis
-        grid_y, grid_x = torch.meshgrid(aranged_tensor, aranged_tensor)
-        # (1, 1, 2, 13, 13)
-        grid_xy = torch.stack((grid_x, grid_y), dim=0).unsqueeze(0).unsqueeze(0)
-        # pylint: disable=not-callable
-        self.scaled_anchors = torch.tensor(
-            [(w / stride, h / stride) for (w, h) in self.anchors],
-            device=device,
+        return torch.cat(
+            (
+                abs_bbox.reshape(batch_size, 4, -1),
+                abs_conf.reshape(batch_size, 1, -1),
+                abs_cls.reshape(batch_size, self.num_classes, -1),
+            ),
+            dim=1,
         )
-        # (1, 3, 2, 1, 1)
-        grid_wh = self.scaled_anchors.reshape(1, self.num_anchors, 2, 1, 1)
-
-        return grid_xy, grid_wh, stride
 
 
 class MidBlock(nn.Module):
@@ -303,9 +323,29 @@ class MidBlock(nn.Module):
         return inputs, branch
 
 
-class Neck(nn.Module):
+def six_convbn(in_channels, out_channels, anchors, img_size, num_classes, idx):
+    if out_channels % 2 != 0:
+        raise ValueError("out_channels must be divisible by 2.")
+    half_channels = out_channels // 2
+    module_dict = OrderedDict()
+    module_dict[f"module_list_{idx}"] = nn.Sequential(
+        ConvBN(in_channels, half_channels, kernel_size=1),
+        ConvBN(half_channels, out_channels, kernel_size=3),
+        ConvBN(out_channels, half_channels, kernel_size=1),
+        ConvBN(half_channels, out_channels, kernel_size=3),
+        ConvBN(out_channels, half_channels, kernel_size=1),
+    )
+    module_dict[f"tip_{idx}"] = ConvBN(half_channels, out_channels, kernel_size=3)
+    module_dict[f"conv_layer_{idx}"] = nn.Conv2d(
+        out_channels, (num_classes + 5) * len(anchors), kernel_size=1, bias=True
+    )
+    module_dict[f"yolo_layer_{idx}"] = YOLOLayer(anchors, img_size, num_classes)
+    return module_dict
+
+
+class Detector(nn.Module):
     """
-    YOLOv3 Neck.
+    YOLOv3 Detector.
 
     Args:
         img_size (int)
@@ -317,15 +357,68 @@ class Neck(nn.Module):
 
     def __init__(self, img_size: int, num_classes: int) -> None:
         super().__init__()
-        self.block1 = MidBlock(1024, 1024, ANCHORS[-1], img_size, num_classes)
-        self.convbn1 = ConvBN(512, 256, kernel_size=1)
-        self.block2 = MidBlock(768, 512, ANCHORS[1], img_size, num_classes)
-        self.convbn2 = ConvBN(256, 128, kernel_size=1)
-        self.block3 = MidBlock(384, 256, ANCHORS[0], img_size, num_classes)
+        anchors = (
+            ((116, 90), (156, 198), (373, 326)),
+            ((30, 61), (62, 45), (59, 119)),
+            ((10, 13), (16, 30), (33, 23)),
+        )
+        self.module_dict = nn.ModuleDict()
+        channels = ((1024, 1024), (768, 512), (384, 256))
+        for idx, (channel, anchor) in enumerate(zip(channels, anchors)):
+            self.module_dict.update(
+                six_convbn(
+                    *channel,
+                    anchors=anchor,
+                    img_size=img_size,
+                    num_classes=num_classes,
+                    idx=idx,
+                )
+            )
+            if idx != 2:
+                in_channels = channels[idx + 1][-1]
+                out_channels = in_channels // 2
+                self.module_dict[f"conv_block_{idx}"] = ConvBN(
+                    in_channels, out_channels, kernel_size=1
+                )
+                self.module_dict[f"upsample_{idx}"] = nn.Upsample(scale_factor=2.0)
 
-    def forward(
-        self, input_52: Tensor, input_26: Tensor, input_13: Tensor
-    ) -> Tuple[Tensor]:
+        # ConvBN(kernel_size=1)
+        # ConvBN(kernel_size=3)
+        # ConvBN(kernel_size=1)
+        # ConvBN(kernel_size=3)
+        # ConvBN(kernel_size=1)
+        # ConvBN(kernel_size=3)
+        # nn.Conv2d(kernel_size=3)
+        # YOLOLayer()
+        # ConvBN(kernel_size=1)
+        # nn.Upsample(scale_factor=2.0)
+
+        # ConvBN(kernel_size=1)
+        # ConvBN(kernel_size=3)
+        # ConvBN(kernel_size=1)
+        # ConvBN(kernel_size=3)
+        # ConvBN(kernel_size=1)
+        # ConvBN(kernel_size=3)
+        # nn.Conv2d(kernel_size=3)
+        # YOLOLayer()
+        # ConvBN(kernel_size=1)
+        # nn.Upsample(scale_factor=2.0)
+
+        # ConvBN(kernel_size=1)
+        # ConvBN(kernel_size=3)
+        # ConvBN(kernel_size=1)
+        # ConvBN(kernel_size=3)
+        # ConvBN(kernel_size=1)
+        # ConvBN(kernel_size=3)
+        # nn.Conv2d(kernel_size=3)
+        # YOLOLayer()
+        # self.block1 = MidBlock(1024, 1024, ANCHORS[-1], img_size, num_classes)
+        # self.convbn1 = ConvBN(512, 256, kernel_size=1)
+        # self.block2 = MidBlock(768, 512, ANCHORS[1], img_size, num_classes)
+        # self.convbn2 = ConvBN(256, 128, kernel_size=1)
+        # self.block3 = MidBlock(384, 256, ANCHORS[0], img_size, num_classes)
+
+    def forward(self, inputs: Tensor, target: Tensor = None) -> Tuple[Tensor]:
         """
         YOLOv3 Neck Block forward function.
 
@@ -337,17 +430,35 @@ class Neck(nn.Module):
         Returns:
             Tuple[Tensor]: out1, out2, out3
         """
-        out1, branch = self.block1(input_13)
-        inputs = self.convbn1(branch)
-        inputs = F.interpolate(inputs, scale_factor=2.0)
-        inputs = torch.cat((input_26, inputs), dim=1)
-        out2, branch = self.block2(inputs)
-        inputs = self.convbn2(branch)
-        inputs = F.interpolate(inputs, scale_factor=2.0)
-        inputs = torch.cat((input_52, inputs), dim=1)
-        out3, _ = self.block3(inputs)
-
-        return out1, out2, out3
+        # out1, branch = self.block1(input_13, target)
+        # inputs = self.convbn1(branch)
+        # inputs = F.interpolate(inputs, scale_factor=2.0)
+        # inputs = torch.cat((input_26, inputs), dim=1)
+        # out2, branch = self.block2(inputs, target)
+        # inputs = self.convbn2(branch)
+        # inputs = F.interpolate(inputs, scale_factor=2.0)
+        # inputs = torch.cat((input_52, inputs), dim=1)
+        # out3, _ = self.block3(inputs, target)
+        results = []
+        output = inputs[-1]
+        idx = 1
+        for name, module in self.module_dict.items():
+            if "module_list" in name:
+                output = module(output)
+                tip = output
+            elif "yolo_layer" in name:
+                results.append(module(output, target))
+                # results.append(module(output, target))
+            elif "conv_block" in name:
+                output = module(tip)
+            elif "upsample" in name:
+                output = module(output)
+                output = torch.cat((output, inputs[idx]), dim=1)
+                idx -= 1
+            else:
+                output = module(output)
+        del tip
+        return results
 
 
 class YOLOv3(nn.Module):
@@ -364,10 +475,10 @@ class YOLOv3(nn.Module):
 
     def __init__(self, img_size: int, num_classes: int) -> None:
         super().__init__()
-        self.backbone = BackBone()
-        self.neck = Neck(img_size, num_classes)
+        self.extractor = Extractor()
+        self.detector = Detector(img_size, num_classes)
 
-    def forward(self, inputs: Tensor) -> Tensor:
+    def forward(self, inputs: Tensor, target: Tensor = None) -> Tensor:
         """
         YOLOv3 forward function.
 
@@ -377,10 +488,10 @@ class YOLOv3(nn.Module):
         Returns:
             Tuple[Tensor]: out1, out2, out3
         """
-        output_52, output_26, output_13 = self.backbone(inputs)
-        out1, out2, out3 = self.neck(output_52, output_26, output_13)
-
-        return out1, out2, out3
+        results = self.extractor(inputs)
+        results = self.detector(results, target)
+        # out1, out2, out3 = self.neck(output_52, output_26, output_13, target)
+        return results
 
 
 def yolov3_darknet53_voc(
@@ -390,3 +501,11 @@ def yolov3_darknet53_voc(
 ):
     net = YOLOv3(img_size=img_size, num_classes=num_classes)
     return net
+
+
+# net = yolov3_darknet53_voc()
+# net.train()
+# t = torch.rand(1, 6)
+# y = net(torch.rand(1, 3, 416, 416), t)
+
+# print(y)

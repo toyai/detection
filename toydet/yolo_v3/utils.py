@@ -4,8 +4,7 @@ import torch
 from ignite.utils import manual_seed
 from torch import Tensor
 from torch.nn import functional as F
-from torch.nn.functional import pad
-from torchvision.ops import box_convert, box_iou
+from torchvision.ops import box_convert
 
 manual_seed(666)
 
@@ -29,7 +28,7 @@ def parse_cfg(cfg: str):
     return modules
 
 
-def wh_bbox_iou(wh1, wh2):
+def box_iou_wh(wh1, wh2):
     wh2 = wh2.t()
     w1, h1 = wh1[0], wh1[1]
     w2, h2 = wh2[0], wh2[1]
@@ -58,13 +57,42 @@ def yolo_loss(pred, target: Tensor, stride, anchors):
     return loss_xywh, loss_conf, loss_cls
 
 
+def get_abs_yolo_bbox(t_bbox: Tensor, anchors):
+    # t_bbox: [batch, num_classes + 5, num_anchors, grid_size, grid_size]
+    grid_size = t_bbox.size(-1)
+    t_xy, t_wh = torch.split(t_bbox, (2, 2), dim=1)
+    aranged_tensor = torch.arange(grid_size, device=t_bbox.device)
+    # grid_x is increasing values in x-axis
+    # grid_y is increasing values in y-axis
+    grid_y, grid_x = torch.meshgrid(aranged_tensor, aranged_tensor)
+    # grid_xy: [1, 2, 1, grid_size, grid_size]
+    grid_xy = torch.stack((grid_x, grid_y), dim=0)[None, :, None, :, :]
+    # grid_wh: [1, 2, 3, 1, 1]
+    grid_wh = anchors.t()[None, :, :, None, None]
+
+    b_xy = torch.add(t_xy, grid_xy)
+    b_wh = torch.exp(t_wh) * grid_wh
+    b_bbox = torch.cat((b_xy, b_wh), dim=1)
+
+    return b_bbox
+
+
+def get_rel_yolo_bbox(b_bbox: Tensor, anchors):
+    b_xy, b_wh = torch.split(b_bbox, (2, 2), dim=-1)
+    t_xy = b_xy - torch.floor(b_xy)
+    t_wh = torch.log(b_wh / anchors)
+
+    return torch.cat((t_xy, t_wh), dim=-1)
+
+
 def build_targets(pred, target: Tensor, stride, anchors):
-    pred_bbox, pred_conf, pred_cls = pred
+    # pred_bbox, pred_conf, pred_cls = pred
+    pred_bbox, pred_conf, pred_cls = torch.split(pred, (4, 1, 20), dim=1)
 
     target_bbox = torch.zeros_like(pred_bbox, device=pred_bbox.device)
     # target_conf = torch.zeros_like(pred_conf, device=pred_conf.device)
     target_cls = torch.zeros(
-        (pred_cls.shape[0], pred_cls.shape[1], pred_cls.shape[3], pred_cls.shape[4]),
+        (pred_cls.shape[0], pred_cls.shape[2], pred_cls.shape[3], pred_cls.shape[4]),
         device=pred_cls.device,
         dtype=torch.long,
     )
@@ -75,25 +103,32 @@ def build_targets(pred, target: Tensor, stride, anchors):
     target_ = target.clone()
     target_[:, 2:6] = box_convert(target[:, 2:6], "xyxy", "cxcywh") / stride
     # assert target_ >= 0.0
-
     cxcy_t = torch.narrow(target_, dim=-1, start=2, length=2)
     wh_t = torch.narrow(target_, dim=-1, start=4, length=2)
-    wh_t_ = pad(wh_t, (2, 0, 0, 0))
-    anchors_ = pad(anchors, (2, 0, 0, 0))
-    ious = box_iou(anchors_, wh_t_)
-    best_ious, best_n = torch.max(ious, 0)
-
+    ious = torch.stack([box_iou_wh(anchor, wh_t) for anchor in anchors], dim=0)
+    _, best_n = torch.max(ious, 0)
     batch, labels = torch.narrow(target, dim=-1, start=0, length=2).long().t()
     width, height = cxcy_t.long().t()
 
-    obj_mask[batch, best_n, :, height, width] = 1
+    obj_mask[batch, :, best_n, height, width] = 1
 
-    target_bbox[batch, best_n, :2, height, width] = cxcy_t - torch.floor(cxcy_t)
-    target_bbox[batch, best_n, 2:, height, width] = torch.log(wh_t / anchors[best_n])
+    target_bbox[batch, :2, best_n, height, width] = cxcy_t - torch.floor(cxcy_t)
+    target_bbox[batch, 2:, best_n, height, width] = torch.log(wh_t / anchors[best_n])
     target_cls[batch, best_n, height, width] = labels
 
     # ious_scores[batch, best_n, :, height, width] = box_iou(pred_bbox, target_bbox)
 
     target_conf = obj_mask.float()
 
-    return obj_mask, target_bbox, target_conf, target_cls
+    pred_bbox = torch.masked_select(pred_bbox, obj_mask)
+    pred_conf = torch.masked_select(pred_conf, obj_mask)
+    target_bbox = torch.masked_select(target_bbox, obj_mask)
+    target_conf = torch.masked_select(target_conf, obj_mask)
+
+    pred = {
+        "bbox": pred_bbox,
+        "cls": pred_cls,
+        "conf": pred_conf,
+    }
+    target = {"bbox": target_bbox, "cls": target_cls, "conf": target_conf}
+    return pred, target
