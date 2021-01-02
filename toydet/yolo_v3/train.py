@@ -248,7 +248,7 @@ if config.wandb:
     # --------------------------
     wb_logger.attach_output_handler(
         engine_train,
-        log_train_events,
+        Events.ITERATION_COMPLETED(every=config.log_train),
         tag="train",
         output_transform=lambda output: output,
     )
