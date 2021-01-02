@@ -9,7 +9,7 @@ import torch
 from ignite.contrib.handlers import WandBLogger
 from ignite.engine import Engine, Events
 
-# from ignite.metrics import Loss
+from ignite.metrics import Precision, Recall
 from ignite.utils import manual_seed, setup_logger
 from torch import optim
 from torchvision.ops import box_convert, nms, batched_nms
@@ -173,7 +173,7 @@ def evaluate_fn(engine: Engine, batch, conf_threshold: float = 0.5):
     # labels = [CLASSES[int(label)] for label in best_cls.tolist()]
     # img = draw_bounding_boxes(img.squeeze(0), pred_bbox[best_n], labels)
     # img.show()
-    return preds, target
+    return preds[:, 5:, :], target[:, 1]
 
 
 # -----------------------
@@ -182,6 +182,8 @@ def evaluate_fn(engine: Engine, batch, conf_threshold: float = 0.5):
 engine_train = Engine(train_fn)
 engine_eval = Engine(evaluate_fn)
 
+Precision(average=True, device=device).attach(engine_eval, "precision")
+Recall(average=True, device=device).attach(engine_eval, "recall")
 
 # Loss(
 #     mse_loss,

@@ -28,6 +28,45 @@ ANCHORS = (
 )
 
 
+def _make_residual_layers(in_channels, out_channels, times):
+    """
+    Make residual block `times` times.
+
+    Args:
+        in_channels (int)
+        out_channels (int)
+        times (int)
+
+    Returns:
+        module_list (nn.Sequential)
+    """
+    module_list = []
+    for _ in range(times):
+        module_list.append(ResidualBlock(out_channels))
+
+    return nn.Sequential(*module_list)
+
+
+def six_convbn(in_channels, out_channels, anchors, img_size, num_classes, idx):
+    if out_channels % 2 != 0:
+        raise ValueError("out_channels must be divisible by 2.")
+    half_channels = out_channels // 2
+    module_dict = OrderedDict()
+    module_dict[f"module_list_{idx}"] = nn.Sequential(
+        ConvBN(in_channels, half_channels, kernel_size=1),
+        ConvBN(half_channels, out_channels, kernel_size=3),
+        ConvBN(out_channels, half_channels, kernel_size=1),
+        ConvBN(half_channels, out_channels, kernel_size=3),
+        ConvBN(out_channels, half_channels, kernel_size=1),
+    )
+    module_dict[f"tip_{idx}"] = ConvBN(half_channels, out_channels, kernel_size=3)
+    module_dict[f"conv_layer_{idx}"] = nn.Conv2d(
+        out_channels, (num_classes + 5) * len(anchors), kernel_size=1, bias=True
+    )
+    module_dict[f"yolo_layer_{idx}"] = YOLOLayer(anchors, img_size, num_classes)
+    return module_dict
+
+
 class ConvBN(nn.Module):
     """
     Convolution2D -> Normalization -> Activation Block.
@@ -97,25 +136,6 @@ class ResidualBlock(nn.Module):
         """
         shortcut = inputs
         return self.convbn2(self.convbn1(inputs)) + shortcut
-
-
-def _make_residual_layers(in_channels, out_channels, times):
-    """
-    Make residual block `times` times.
-
-    Args:
-        in_channels (int)
-        out_channels (int)
-        times (int)
-
-    Returns:
-        module_list (nn.Sequential)
-    """
-    module_list = []
-    for _ in range(times):
-        module_list.append(ResidualBlock(out_channels))
-
-    return nn.Sequential(*module_list)
 
 
 class Extractor(nn.Module):
@@ -267,82 +287,6 @@ class YOLOLayer(nn.Module):
         )
 
 
-class MidBlock(nn.Module):
-    """
-    Middle block of YOLOve Neck.
-
-    Args:
-        in_channels (int)
-        out_channels (int)
-        anchors (Sequence[int])
-        img_size (int)
-        num_classes (int)
-
-    Returns:
-        inputs, branch (Tuple[Tensor], Tensor)
-    """
-
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        anchors: Sequence[int],
-        img_size: int,
-        num_classes: int,
-    ) -> None:
-        super().__init__()
-        if out_channels % 2 != 0:
-            raise ValueError("out_channels must be divisible by 2.")
-        half_channels = out_channels // 2
-        self.sequential = nn.Sequential(
-            ConvBN(in_channels, half_channels, kernel_size=1),
-            ConvBN(half_channels, out_channels, kernel_size=3),
-            ConvBN(out_channels, half_channels, kernel_size=1),
-            ConvBN(half_channels, out_channels, kernel_size=3),
-            ConvBN(out_channels, half_channels, kernel_size=1),
-        )
-        self.branch = ConvBN(half_channels, out_channels, kernel_size=3)
-        self.conv = nn.Conv2d(
-            out_channels, (num_classes + 5) * len(anchors), 1, bias=True
-        )
-        self.yolo_layer = YOLOLayer(anchors, img_size, num_classes)
-
-    def forward(self, inputs: Tensor) -> Tuple[Tensor]:
-        """
-        YOLOv3 Neck MidBlock forward function.
-
-        Args:
-            inputs (Tensor)
-
-        Returns:
-            Tuple[Tensor], Tensor: inputs, branch (value from the last ConvBN layer)
-        """
-        branch = self.sequential(inputs)
-        inputs = self.yolo_layer(self.conv(self.branch(branch)))
-
-        return inputs, branch
-
-
-def six_convbn(in_channels, out_channels, anchors, img_size, num_classes, idx):
-    if out_channels % 2 != 0:
-        raise ValueError("out_channels must be divisible by 2.")
-    half_channels = out_channels // 2
-    module_dict = OrderedDict()
-    module_dict[f"module_list_{idx}"] = nn.Sequential(
-        ConvBN(in_channels, half_channels, kernel_size=1),
-        ConvBN(half_channels, out_channels, kernel_size=3),
-        ConvBN(out_channels, half_channels, kernel_size=1),
-        ConvBN(half_channels, out_channels, kernel_size=3),
-        ConvBN(out_channels, half_channels, kernel_size=1),
-    )
-    module_dict[f"tip_{idx}"] = ConvBN(half_channels, out_channels, kernel_size=3)
-    module_dict[f"conv_layer_{idx}"] = nn.Conv2d(
-        out_channels, (num_classes + 5) * len(anchors), kernel_size=1, bias=True
-    )
-    module_dict[f"yolo_layer_{idx}"] = YOLOLayer(anchors, img_size, num_classes)
-    return module_dict
-
-
 class Detector(nn.Module):
     """
     YOLOv3 Detector.
@@ -382,42 +326,6 @@ class Detector(nn.Module):
                 )
                 self.module_dict[f"upsample_{idx}"] = nn.Upsample(scale_factor=2.0)
 
-        # ConvBN(kernel_size=1)
-        # ConvBN(kernel_size=3)
-        # ConvBN(kernel_size=1)
-        # ConvBN(kernel_size=3)
-        # ConvBN(kernel_size=1)
-        # ConvBN(kernel_size=3)
-        # nn.Conv2d(kernel_size=3)
-        # YOLOLayer()
-        # ConvBN(kernel_size=1)
-        # nn.Upsample(scale_factor=2.0)
-
-        # ConvBN(kernel_size=1)
-        # ConvBN(kernel_size=3)
-        # ConvBN(kernel_size=1)
-        # ConvBN(kernel_size=3)
-        # ConvBN(kernel_size=1)
-        # ConvBN(kernel_size=3)
-        # nn.Conv2d(kernel_size=3)
-        # YOLOLayer()
-        # ConvBN(kernel_size=1)
-        # nn.Upsample(scale_factor=2.0)
-
-        # ConvBN(kernel_size=1)
-        # ConvBN(kernel_size=3)
-        # ConvBN(kernel_size=1)
-        # ConvBN(kernel_size=3)
-        # ConvBN(kernel_size=1)
-        # ConvBN(kernel_size=3)
-        # nn.Conv2d(kernel_size=3)
-        # YOLOLayer()
-        # self.block1 = MidBlock(1024, 1024, ANCHORS[-1], img_size, num_classes)
-        # self.convbn1 = ConvBN(512, 256, kernel_size=1)
-        # self.block2 = MidBlock(768, 512, ANCHORS[1], img_size, num_classes)
-        # self.convbn2 = ConvBN(256, 128, kernel_size=1)
-        # self.block3 = MidBlock(384, 256, ANCHORS[0], img_size, num_classes)
-
     def forward(self, inputs: Tensor, target: Tensor = None) -> Tuple[Tensor]:
         """
         YOLOv3 Neck Block forward function.
@@ -430,15 +338,6 @@ class Detector(nn.Module):
         Returns:
             Tuple[Tensor]: out1, out2, out3
         """
-        # out1, branch = self.block1(input_13, target)
-        # inputs = self.convbn1(branch)
-        # inputs = F.interpolate(inputs, scale_factor=2.0)
-        # inputs = torch.cat((input_26, inputs), dim=1)
-        # out2, branch = self.block2(inputs, target)
-        # inputs = self.convbn2(branch)
-        # inputs = F.interpolate(inputs, scale_factor=2.0)
-        # inputs = torch.cat((input_52, inputs), dim=1)
-        # out3, _ = self.block3(inputs, target)
         results = []
         output = inputs[-1]
         idx = 1
@@ -448,7 +347,6 @@ class Detector(nn.Module):
                 tip = output
             elif "yolo_layer" in name:
                 results.append(module(output, target))
-                # results.append(module(output, target))
             elif "conv_block" in name:
                 output = module(tip)
             elif "upsample" in name:
@@ -490,7 +388,6 @@ class YOLOv3(nn.Module):
         """
         results = self.extractor(inputs)
         results = self.detector(results, target)
-        # out1, out2, out3 = self.neck(output_52, output_26, output_13, target)
         return results
 
 
