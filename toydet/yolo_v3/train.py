@@ -163,10 +163,13 @@ if config.sanity_check:  # for sanity checking
     )
 if config.overfit_batches:  # for overfitting
     dataloader_train = get_dataloader(
-        VOCDetection_, config.overfit_batches, "train", transforms_train, overfit=True
+        VOCDetection_, config.batch_size, "train", transforms_eval, overfit=True
     )
     engine_train.add_event_handler(
-        Events.EPOCH_COMPLETED, lambda: engine_eval.run(dataloader_train, max_epochs=1)
+        Events.EPOCH_COMPLETED,
+        lambda: engine_eval.run(
+            dataloader_train, max_epochs=1, epoch_length=config.overfit_batches
+        ),
     )
 else:
     dataloader_train = get_dataloader(
@@ -293,7 +296,14 @@ if __name__ == "__main__":
         name = cuda_info(logger, device)
 
     # run the training
-    engine_train.run(dataloader_train, max_epochs=config.max_epochs)
+    if config.overfit_batches:
+        engine_train.run(
+            dataloader_train,
+            max_epochs=config.max_epochs,
+            epoch_length=config.overfit_batches,
+        )
+    else:
+        engine_train.run(dataloader_train, max_epochs=config.max_epochs)
 
     if "cuda" in device.type:
         mem_info(logger, device, name)
