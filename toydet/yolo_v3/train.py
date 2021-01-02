@@ -74,49 +74,8 @@ def train_fn(engine: Engine, batch):
     img, target = batch[0].to(device), batch[1].to(device)
     losses_list = net(img, target)
     losses = sum(loss["loss/total"] for loss in losses_list)
-    # pred1, target1 = build_targets(
-    #     pred1,
-    #     target,
-    #     net.neck.block1.yolo_layer.stride,
-    #     net.neck.block1.yolo_layer.scaled_anchors,
-    # )
-    # pred2, target2 = build_targets(
-    #     pred2,
-    #     target,
-    #     net.neck.block2.yolo_layer.stride,
-    #     net.neck.block2.yolo_layer.scaled_anchors,
-    # )
-    # pred3, target3 = build_targets(
-    #     pred3,
-    #     target,
-    #     net.neck.block3.yolo_layer.stride,
-    #     net.neck.block3.yolo_layer.scaled_anchors,
-    # )
-    # loss_xywh_1 = mse_loss(pred1["bbox"], target1["bbox"])
-    # loss_cls_1 = ce_loss(pred1["cls"], target1["cls"])
-    # loss_conf_1 = bce_loss_with_logits(pred1["conf"], target1["conf"])
-    # loss_xywh_2 = mse_loss(pred2["bbox"], target2["bbox"])
-    # loss_cls_2 = ce_loss(pred2["cls"], target2["cls"])
-    # loss_conf_2 = bce_loss_with_logits(pred2["conf"], target2["conf"])
-    # loss_xywh_3 = mse_loss(pred3["bbox"], target3["bbox"])
-    # loss_cls_3 = ce_loss(pred3["cls"], target3["cls"])
-    # loss_conf_3 = bce_loss_with_logits(pred3["conf"], target3["conf"])
-    # losses = (
-    #     loss_xywh_1
-    #     + loss_conf_1
-    #     + loss_cls_1
-    #     + loss_xywh_2
-    #     + loss_conf_2
-    #     + loss_cls_2
-    #     + loss_xywh_3
-    #     + loss_conf_3
-    #     + loss_cls_3
-    # )
     loss_item = {
         "epoch": engine.state.epoch,
-        # "stride/0": net.neck.block1.yolo_layer.stride,
-        # "stride/1": net.neck.block2.yolo_layer.stride,
-        # "stride/2": net.neck.block3.yolo_layer.stride,
         "loss/xywh/0": losses_list[0]["loss/xywh"],
         "loss/xywh/1": losses_list[1]["loss/xywh"],
         "loss/xywh/2": losses_list[2]["loss/xywh"],
@@ -184,52 +143,6 @@ engine_eval = Engine(evaluate_fn)
 
 # Precision(average=True, device=device).attach(engine_eval, "precision")
 # Recall(average=True, device=device).attach(engine_eval, "recall")
-
-# Loss(
-#     mse_loss,
-#     lambda output: (output["pred1"]["bbox"], output["target1"]["bbox"]),
-#     device=device,
-# ).attach(engine_eval, "loss/xywh/0")
-# Loss(
-#     ce_loss,
-#     lambda output: (output["pred1"]["cls"], output["target1"]["cls"]),
-#     device=device,
-# ).attach(engine_eval, "loss/cls/0")
-# Loss(
-#     bce_loss_with_logits,
-#     lambda output: (output["pred1"]["conf"], output["target1"]["conf"]),
-#     device=device,
-# ).attach(engine_eval, "loss/conf/0")
-# Loss(
-#     mse_loss,
-#     lambda output: (output["pred2"]["bbox"], output["target2"]["bbox"]),
-#     device=device,
-# ).attach(engine_eval, "loss/xywh/1")
-# Loss(
-#     ce_loss,
-#     lambda output: (output["pred2"]["cls"], output["target2"]["cls"]),
-#     device=device,
-# ).attach(engine_eval, "loss/cls/1")
-# Loss(
-#     bce_loss_with_logits,
-#     lambda output: (output["pred2"]["conf"], output["target2"]["conf"]),
-#     device=device,
-# ).attach(engine_eval, "loss/conf/1")
-# Loss(
-#     mse_loss,
-#     lambda output: (output["pred3"]["bbox"], output["target3"]["bbox"]),
-#     device=device,
-# ).attach(engine_eval, "loss/xywh/2")
-# Loss(
-#     ce_loss,
-#     lambda output: (output["pred3"]["cls"], output["target3"]["cls"]),
-#     device=device,
-# ).attach(engine_eval, "loss/cls/2")
-# Loss(
-#     bce_loss_with_logits,
-#     lambda output: (output["pred3"]["conf"], output["target3"]["conf"]),
-#     device=device,
-# ).attach(engine_eval, "loss/conf/2")
 
 # --------------------------
 # train and eval transforms

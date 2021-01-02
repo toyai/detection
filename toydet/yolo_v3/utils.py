@@ -88,14 +88,6 @@ def get_abs_yolo_bbox(t_bbox: Tensor, anchors: Tensor):
     return torch.cat((b_xy, b_wh), dim=-1)
 
 
-def get_rel_yolo_bbox(b_bbox: Tensor, anchors: Tensor):
-    # b_bbox is already scaled to grid_size
-    b_xy, b_wh = torch.split(b_bbox, (2, 2), dim=-1)
-    t_xy = b_xy - torch.floor(b_xy)
-    t_wh = torch.log(b_wh / anchors[None, :, None, None, :])
-    return torch.cat((t_xy, t_wh), dim=-1)
-
-
 def build_targets(
     pred: Tensor, target: Tensor, anchors: Tensor, ignore_threshold: float = 0.5
 ):
