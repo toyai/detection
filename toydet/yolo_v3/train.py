@@ -231,6 +231,11 @@ def plot_transformed_imgs(engine):
         logger.info("Transformed image saved as %s", fig_name)
 
 
+# pylint: disable=not-callable
+log_train_events = Events.ITERATION_COMPLETED(
+    every=config.log_train
+) | Events.ITERATION_COMPLETED(once=1)
+
 if config.wandb:
     # --------------
     # wandb logger
@@ -243,8 +248,7 @@ if config.wandb:
     # --------------------------
     wb_logger.attach_output_handler(
         engine_train,
-        Events.ITERATION_COMPLETED(every=config.log_train)
-        | Events.ITERATION_COMPLETED(once=1),
+        log_train_events,
         tag="train",
         output_transform=lambda output: output,
     )
@@ -254,7 +258,7 @@ if config.wandb:
     # ----------------------------
     wb_logger.attach_output_handler(
         engine_eval,
-        Events.EPOCH_COMPLETED(every=config.log_eval),
+        Events.EPOCH_COMPLETED(every=config.log_eval),  # pylint: disable=not-callable
         tag="eval",
         metric_names="all",
         global_step_transform=lambda *_: engine_train.state.iteration,
@@ -272,12 +276,12 @@ def log_metrics(engine, mode, output):
 
 
 engine_train.add_event_handler(
-    Events.ITERATION_COMPLETED(every=config.log_train)
-    | Events.ITERATION_COMPLETED(once=1),
+    log_train_events,
     lambda engine: log_metrics(engine, "Train", engine.state.output),
 )
 
 engine_eval.add_event_handler(
+    # pylint: disable=not-callable
     Events.EPOCH_COMPLETED(every=config.log_eval),
     lambda engine: log_metrics(
         engine, "Eval", {k: v for k, v in sorted(engine.state.metrics.items())}
