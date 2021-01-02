@@ -6,6 +6,8 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import torch
 from torch import Tensor, nn
+from torchvision.ops import box_convert
+from ignite.distributed import device
 
 from toydet.yolo_v3.utils import build_targets, get_abs_yolo_bbox
 
@@ -14,7 +16,6 @@ __all__ = (
     "ConvBN",
     "ResidualBlock",
     "YOLOLayer",
-    "MidBlock",
     "YOLOv3",
 )
 
@@ -47,7 +48,7 @@ def _make_residual_layers(in_channels, out_channels, times):
     return nn.Sequential(*module_list)
 
 
-def six_convbn(in_channels, out_channels, anchors, img_size, num_classes, idx):
+def six_convbn(in_channels, out_channels, anchors, num_classes, idx):
     if out_channels % 2 != 0:
         raise ValueError("out_channels must be divisible by 2.")
     half_channels = out_channels // 2
@@ -63,7 +64,7 @@ def six_convbn(in_channels, out_channels, anchors, img_size, num_classes, idx):
     module_dict[f"conv_layer_{idx}"] = nn.Conv2d(
         out_channels, (num_classes + 5) * len(anchors), kernel_size=1, bias=True
     )
-    module_dict[f"yolo_layer_{idx}"] = YOLOLayer(anchors, img_size, num_classes)
+    module_dict[f"yolo_layer_{idx}"] = YOLOLayer(anchors, num_classes)
     return module_dict
 
 
@@ -183,7 +184,7 @@ class YOLOLayer(nn.Module):
     YOLOv3 YOLO Layer.
 
     Args:
-        anchors (Sequence[int])
+        anchors (Tensor)
         img_size (int)
         num_classes (int)
 
@@ -191,18 +192,15 @@ class YOLOLayer(nn.Module):
         prediction (Tensor) [B, A, H, W, C + 5]
     """
 
-    def __init__(self, anchors: Sequence[int], img_size: int, num_classes: int) -> None:
+    def __init__(self, anchors: Tensor, num_classes: int) -> None:
         super().__init__()
         self.anchors = anchors
-        self.img_size = img_size
         self.num_anchors = len(anchors)
         self.num_classes = num_classes
         self.grid_size = 0
         self.bce_loss_with_logits = nn.BCEWithLogitsLoss()
         self.ce_loss = nn.CrossEntropyLoss()
         self.mse_loss = nn.MSELoss()
-        self.stride = 0
-        self.scaled_anchors = ...
 
     def forward(self, inputs: Tensor, target: Tensor = None) -> Tensor:
         """
@@ -219,52 +217,49 @@ class YOLOLayer(nn.Module):
             raise ValueError("image must have same height and width.")
 
         batch_size = inputs.size(0)
-        grid_size = inputs.size(2)  # 13x13, 26x26, 52x52
+        grid_size = inputs.size(2)  # 13x13, 26x26, 52x52 for 416 img size
 
         # B - batch_size, A - num_anchors, C - num_classes, H - height, W - width
-        # (B, C + 5, A, H, W)
-        pred = inputs.reshape(
-            batch_size, self.num_classes + 5, self.num_anchors, grid_size, grid_size
-        ).contiguous()
+        # [B, A, H, W, C + 5]
+        # inputs: [B, A * (C + 5), H, W]
+        # pred: [B, A, H, W, C + 5]
+        pred = (
+            inputs.reshape(
+                batch_size, self.num_anchors, self.num_classes + 5, grid_size, grid_size
+            )
+            .permute(0, 1, 3, 4, 2)
+            .contiguous()
+        )
 
         # cx, cy - center x, center y
         # cx, cy are relative values meaning they are between 0 and 1
         # w, h can be greater than 1
-        # make into relative values, sigmoid(txty) from paper
-        pred[:, :2, :, :, :] = torch.sigmoid(pred[:, :2, :, :, :])
+        # make into relative values, sigmoid(tx,ty) from paper
+        pred[..., :2] = torch.sigmoid(pred[..., :2])
 
         if self.grid_size != grid_size:
             self.grid_size = grid_size
-            self.stride = self.img_size / self.grid_size
-            # pylint: disable=not-callable
-            self.scaled_anchors = torch.tensor(
-                [(w / self.stride, h / self.stride) for (w, h) in self.anchors],
-                device=pred.device,
-            )
+            # anchors are already divided by image size, so its [0-1]
+            # multiply by grid_size for grid_size x grid_size output
+            self.anchors = self.anchors * self.grid_size
             logger.info(
-                "Recomputing for grid size %i - stride %i ..."
-                % (grid_size, self.stride)
+                "Multiplied normalized anchors with grid size %i ...", grid_size
             )
 
         if self.training:
-            # wh2 = scaled_target[:, 2:]
-            # ious = torch.stack(
-            #     [box_iou_wh(anchor, wh2) for anchor in self.scaled_anchors], dim=0
-            # )
-            # _, idx = torch.max(ious, 0)
-            # pred_bbox, pred_conf, pred_cls = torch.split(
-            #     pred, (4, 1, self.num_classes), dim=1
-            # )
-            # print(get_rel_yolo_bbox(scaled_target, self.scaled_anchors[idx]))
-            # return pred, self.stride, self.scaled_anchors
-            # pred = torch.split(pred, (4, 1, self.num_classes), dim=2)
-            pred, target = build_targets(pred, target, self.stride, self.scaled_anchors)
+            # target: [number of objects in a batch, 6]
+            # target is also normalized by img_size, so its [0-1]
+            # multiplied with grid_size for grid_size x grid_size output
+            target = torch.cat(
+                (target[..., :2], target[..., 2:] * self.grid_size), dim=-1
+            )
+            pred, target = build_targets(pred, target, self.anchors, 0.5)
             loss_xywh = self.mse_loss(pred["bbox"], target["bbox"])
             loss_cls = self.ce_loss(pred["cls"], target["cls"])
-            loss_conf = self.bce_loss_with_logits(pred["conf"], target["conf"])
+            loss_obj = self.bce_loss_with_logits(pred["obj"], target["obj"])
+            loss_noobj = self.bce_loss_with_logits(pred["noobj"], target["noobj"])
+            loss_conf = loss_obj + loss_noobj
             losses = loss_cls + loss_conf + loss_xywh
-            # cx, cy, w, h, confidence, class
-            # return torch.split(pred, (4, 1, self.num_classes), dim=2)
             return {
                 "loss/xywh": loss_xywh.detach().cpu().item(),
                 "loss/cls": loss_cls.detach().cpu().item(),
@@ -272,18 +267,22 @@ class YOLOLayer(nn.Module):
                 "loss/total": losses,
             }
 
-        rel_bbox, rel_conf, rel_cls = torch.split(pred, (4, 1, self.num_classes), dim=1)
-        abs_bbox = get_abs_yolo_bbox(rel_bbox, self.scaled_anchors) * self.stride
+        rel_bbox, rel_conf, rel_cls = torch.split(
+            pred, (4, 1, self.num_classes), dim=-1
+        )
+        # divide by grid_size so they are in [0-1]
+        # and later we can multiply with img_size for img_size x img_size output
+        abs_bbox = get_abs_yolo_bbox(rel_bbox, self.anchors) / self.grid_size
         abs_conf = torch.sigmoid(rel_conf)
         abs_cls = torch.sigmoid(rel_cls)
 
         return torch.cat(
             (
-                abs_bbox.reshape(batch_size, 4, -1),
-                abs_conf.reshape(batch_size, 1, -1),
-                abs_cls.reshape(batch_size, self.num_classes, -1),
+                abs_bbox.reshape(batch_size, -1, 4),
+                abs_conf.reshape(batch_size, -1, 1),
+                abs_cls.reshape(batch_size, -1, self.num_classes),
             ),
-            dim=1,
+            dim=-1,
         )
 
 
@@ -299,12 +298,19 @@ class Detector(nn.Module):
         out1, out2, out3 (Tuple[Tensor])
     """
 
-    def __init__(self, img_size: int, num_classes: int) -> None:
+    def __init__(self, num_classes: int) -> None:
         super().__init__()
+        # pylint: disable=not-callable
         anchors = (
-            ((116, 90), (156, 198), (373, 326)),
-            ((30, 61), (62, 45), (59, 119)),
-            ((10, 13), (16, 30), (33, 23)),
+            torch.tensor(
+                [
+                    ((116, 90), (156, 198), (373, 326)),
+                    ((30, 61), (62, 45), (59, 119)),
+                    ((10, 13), (16, 30), (33, 23)),
+                ],
+                device=device(),
+            )
+            / 416.0
         )
         self.module_dict = nn.ModuleDict()
         channels = ((1024, 1024), (768, 512), (384, 256))
@@ -313,7 +319,6 @@ class Detector(nn.Module):
                 six_convbn(
                     *channel,
                     anchors=anchor,
-                    img_size=img_size,
                     num_classes=num_classes,
                     idx=idx,
                 )
@@ -373,8 +378,9 @@ class YOLOv3(nn.Module):
 
     def __init__(self, img_size: int, num_classes: int) -> None:
         super().__init__()
+        self.img_size = img_size
         self.extractor = Extractor()
-        self.detector = Detector(img_size, num_classes)
+        self.detector = Detector(num_classes)
 
     def forward(self, inputs: Tensor, target: Tensor = None) -> Tensor:
         """
@@ -387,6 +393,14 @@ class YOLOv3(nn.Module):
             Tuple[Tensor]: out1, out2, out3
         """
         results = self.extractor(inputs)
+        if self.training:
+            target = torch.cat(
+                (
+                    target[:, :2],
+                    box_convert(target[:, 2:], "xyxy", "cxcywh") / self.img_size,
+                ),
+                dim=-1,
+            )
         results = self.detector(results, target)
         return results
 

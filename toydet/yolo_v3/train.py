@@ -149,7 +149,7 @@ def evaluate_fn(engine: Engine, batch, conf_threshold: float = 0.5):
     net.eval()
     img, target = batch[0].to(device), batch[1].to(device)
     preds = net(img)
-    preds = torch.cat(preds, dim=-1)
+    preds = torch.cat(preds, dim=1)
     conf_mask = (preds[:, 4, :] > conf_threshold).float().unsqueeze(1)
     preds = preds * conf_mask
     # os.makedirs("./predictions", exist_ok=True)
@@ -182,8 +182,8 @@ def evaluate_fn(engine: Engine, batch, conf_threshold: float = 0.5):
 engine_train = Engine(train_fn)
 engine_eval = Engine(evaluate_fn)
 
-Precision(average=True, device=device).attach(engine_eval, "precision")
-Recall(average=True, device=device).attach(engine_eval, "recall")
+# Precision(average=True, device=device).attach(engine_eval, "precision")
+# Recall(average=True, device=device).attach(engine_eval, "recall")
 
 # Loss(
 #     mse_loss,
