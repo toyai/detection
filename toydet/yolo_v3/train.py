@@ -32,7 +32,7 @@ parser = ArgumentParser()
 parser.add_argument("--batch_size", default=2, type=int)
 parser.add_argument("--lr", default=1e-3, type=float)
 parser.add_argument("--model_name", default="yolov3_darknet53_voc", type=str)
-parser.add_argument("--max_epochs", default=10, type=int)
+parser.add_argument("--max_epochs", default=2, type=int)
 parser.add_argument("--verbose", "-v", action="store_true", help="use logging.INFO")
 parser.add_argument("--filepath", default=None, type=str, help="write stdout to file")
 parser.add_argument("--log_train", type=int, default=50)
@@ -57,9 +57,9 @@ logger = setup_logger(
     filepath=config.filepath,
 )
 
-# ---------------------------------
-# model, optimizer, device, loss
-# ---------------------------------
+# --------------------------
+# model, optimizer, device
+# --------------------------
 device = idist.device()
 net = getattr(models, config.model_name)().to(device)
 optimizer = optim.Adam(net.parameters(), lr=config.lr)
@@ -240,7 +240,8 @@ if config.wandb:
     # --------------------------
     wb_logger.attach_output_handler(
         engine_train,
-        Events.ITERATION_COMPLETED(every=config.log_train),
+        Events.ITERATION_COMPLETED(every=config.log_train)
+        | Events.ITERATION_COMPLETED(once=1),
         tag="train",
         output_transform=lambda output: output,
     )
@@ -268,7 +269,8 @@ def log_metrics(engine, mode, output):
 
 
 engine_train.add_event_handler(
-    Events.ITERATION_COMPLETED(every=config.log_train),
+    Events.ITERATION_COMPLETED(every=config.log_train)
+    | Events.ITERATION_COMPLETED(once=1),
     lambda engine: log_metrics(engine, "Train", engine.state.output),
 )
 

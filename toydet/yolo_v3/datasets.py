@@ -103,6 +103,6 @@ def get_dataloader(dataset, batch_size, split, transforms, overfit=False):
         batch_size=batch_size,
         shuffle=is_train and not overfit,
         collate_fn=collate_fn,
-        # num_workers=cpu_count(),
+        num_workers=cpu_count(),
         pin_memory=torch.cuda.is_available(),
     )
