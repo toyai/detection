@@ -96,6 +96,7 @@ def build_targets(
     target_cls = torch.zeros(
         (pred_cls.size(0), pred_cls.size(1), pred_cls.size(2), pred_cls.size(3)),
         dtype=torch.long,
+        device=pred_cls.device,
     )
     # ious_scores = torch.zeros_like(pred_cls, device=pred_cls.device)
     obj_mask = torch.zeros_like(pred_conf, dtype=torch.bool)
