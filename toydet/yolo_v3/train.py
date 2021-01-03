@@ -30,7 +30,7 @@ manual_seed(666)
 
 parser = ArgumentParser()
 parser.add_argument("--batch_size", default=2, type=int)
-parser.add_argument("--lr", default=1e-3, type=float)
+parser.add_argument("--lr", default=3e-4, type=float)
 parser.add_argument("--model_name", default="yolov3_darknet53_voc", type=str)
 parser.add_argument("--max_epochs", default=2, type=int)
 parser.add_argument("--verbose", "-v", action="store_true", help="use logging.INFO")
@@ -312,7 +312,7 @@ engine_eval.add_event_handler(
 
 if __name__ == "__main__":
     logger.info("Running on %s ...", device)
-    logger.info("Configs %s", config)
+    logger.info(config)
     params = sum(p.numel() for p in net.parameters())
     gradients = sum(p.numel() for p in net.parameters() if p.requires_grad)
     logger.info("Number of parameters: %g", params)
