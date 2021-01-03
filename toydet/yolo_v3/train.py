@@ -1,26 +1,24 @@
+from typing import OrderedDict, Union
 import os
 import logging
 from argparse import ArgumentParser
 from datetime import datetime
 from random import randint, randrange
-
 import ignite.distributed as idist
 import torch
 from ignite.contrib.handlers import WandBLogger
 from ignite.engine import Engine, Events
-
 from ignite.metrics import Precision, Recall
 from ignite.utils import manual_seed, setup_logger
+from torch import nn
 from torch import optim
 from torchvision.ops import box_convert, nms, batched_nms
 from torchvision.transforms.functional import to_pil_image
-
 import wandb
 from toydet.transforms import (
     LetterBox,
-    MultiArgsSequential,
-    RandomHorizontalFlip_,
-    RandomVerticalFlip_,
+    RandomHorizontalFlipWithBBox,
+    RandomVerticalFlipWithBBox,
 )
 from toydet.utils import cuda_info, draw_bounding_boxes, mem_info
 from toydet.yolo_v3 import models
@@ -56,6 +54,19 @@ logger = setup_logger(
     level=config.verbose,
     filepath=config.filepath,
 )
+
+
+class SequentialWithDict(nn.Module):
+    def __init__(self, transforms: Union[dict, OrderedDict]):
+        super().__init__()
+        self.transforms = nn.ModuleDict(transforms)
+
+    def forward(self, image, target):
+        for _, module in self.transforms.items():
+            image, target = module(image, target)
+
+        return image, target
+
 
 # --------------------------
 # model, optimizer, device
@@ -147,22 +158,29 @@ engine_eval = Engine(evaluate_fn)
 # --------------------------
 # train and eval transforms
 # --------------------------
-transforms_train = MultiArgsSequential(
-    LetterBox(416), RandomHorizontalFlip_(), RandomVerticalFlip_()
+
+transforms_train = SequentialWithDict(
+    {
+        "LetterBox": LetterBox(416),
+        "RandomHorizontalFlipWithBBox": RandomHorizontalFlipWithBBox(),
+        "RandomVerticalFlipWithBBox": RandomVerticalFlipWithBBox(),
+    }
 )
-transforms_eval = MultiArgsSequential(LetterBox(416))
+transforms_eval = SequentialWithDict({"LetterBox": LetterBox(416)})
 
 # ---------------------------
 # train and eval dataloader
 # ---------------------------
 if config.sanity_check:  # for sanity checking
     dataloader_eval = get_dataloader(VOCDetection_, 2, "val", transforms_eval)
-    engine_train.add_event_handler(
-        Events.STARTED,
-        lambda: engine_eval.run(dataloader_eval, max_epochs=1, epoch_length=2),
-    )
-    # set to None to use `epoch_length`
-    engine_eval.state.max_epochs = None
+
+    @engine_train.on(Events.STARTED)
+    def sanity_check():
+        engine_eval.run(dataloader_eval, max_epochs=1, epoch_length=2)
+        # set to None to use `epoch_length`
+        engine_eval.state.max_epochs = None
+
+
 if config.overfit_batches:  # for overfitting
     dataloader_train = get_dataloader(
         VOCDetection_, config.batch_size, "train", transforms_eval, overfit=True

@@ -38,14 +38,7 @@ class LetterBox(nn.Module):
         return self.__class__.__name__ + f"({self.size})"
 
 
-class MultiArgsSequential(nn.Sequential):
-    def forward(self, inputs, target):
-        for module in self:
-            inputs, target = module(inputs, target)
-        return inputs, target
-
-
-class RandomHorizontalFlip_(nn.Module):
+class RandomHorizontalFlipWithBBox(nn.Module):
     def __init__(self, prob: float = 0.5):
         super().__init__()
         self.prob = prob
@@ -64,7 +57,7 @@ class RandomHorizontalFlip_(nn.Module):
         return self.__class__.__name__ + "(p={})".format(self.prob)
 
 
-class RandomVerticalFlip_(nn.Module):
+class RandomVerticalFlipWithBBox(nn.Module):
     def __init__(self, prob: float = 0.5):
         super().__init__()
         self.prob = prob

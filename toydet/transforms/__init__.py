@@ -1,6 +1,7 @@
-from toydet.transforms.transforms import (  # noqa: F401
+from toydet.transforms.transforms import (
     LetterBox,
-    MultiArgsSequential,
-    RandomHorizontalFlip_,
-    RandomVerticalFlip_,
+    RandomHorizontalFlipWithBBox,
+    RandomVerticalFlipWithBBox,
 )
+
+__all__ = ("LetterBox", "RandomHorizontalFlipWithBBox", "RandomVerticalFlipWithBBox")
