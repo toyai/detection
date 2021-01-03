@@ -1,20 +1,22 @@
-from typing import OrderedDict, Union
-import os
 import logging
+import os
 from argparse import ArgumentParser
+from collections import OrderedDict
 from datetime import datetime
 from random import randint, randrange
+from typing import Union
+
 import ignite.distributed as idist
 import torch
+import wandb
 from ignite.contrib.handlers import WandBLogger
 from ignite.engine import Engine, Events
 from ignite.metrics import Precision, Recall
 from ignite.utils import manual_seed, setup_logger
-from torch import nn
-from torch import optim
-from torchvision.ops import box_convert, nms, batched_nms
+from torch import nn, optim
+from torchvision.ops import batched_nms, box_convert, nms
 from torchvision.transforms.functional import to_pil_image
-import wandb
+
 from toydet.transforms import (
     LetterBox,
     RandomHorizontalFlipWithBBox,

@@ -5,9 +5,9 @@ from collections import OrderedDict
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import torch
+from ignite.distributed import device
 from torch import Tensor, nn
 from torchvision.ops import box_convert
-from ignite.distributed import device
 
 from toydet.yolo_v3.utils import build_targets, get_abs_yolo_bbox
 
