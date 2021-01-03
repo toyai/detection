@@ -161,6 +161,8 @@ if config.sanity_check:  # for sanity checking
         Events.STARTED,
         lambda: engine_eval.run(dataloader_eval, max_epochs=1, epoch_length=2),
     )
+    # set to None to use `epoch_length`
+    engine_eval.state.max_epochs = None
 if config.overfit_batches:  # for overfitting
     dataloader_train = get_dataloader(
         VOCDetection_, config.batch_size, "train", transforms_eval, overfit=True
