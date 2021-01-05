@@ -263,7 +263,7 @@ def run(local_rank, config: DictConfig) -> None:
         # wandb logger
         # --------------
         name = f"bs{config.batch_size}-lr{config.lr}"
-        wb_logger = WandBLogger(config=config, name=name, project="yolov3")
+        wb_logger = WandBLogger(config=config, name=name, project="yolov3", reinit=True)
         wb_logger.watch(net, log="gradients", log_freq=config.log_train)
 
         # --------------------------
@@ -345,6 +345,9 @@ def run(local_rank, config: DictConfig) -> None:
     engine_train.run(
         dataloader_train, max_epochs=config.max_epochs, epoch_length=epoch_length_train
     )
+
+    if config.wandb:
+        wb_logger.finish()
 
 
 @hydra.main(config_path="../configs", config_name="defaults")
