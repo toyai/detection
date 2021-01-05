@@ -137,6 +137,7 @@ VOCdevkit
 wandb
 
 # output
+datasets
 predictions
 
 # hydra

@@ -1,11 +1,10 @@
 import logging
 import os
 from argparse import ArgumentParser
-import logging
 from collections import OrderedDict
 from datetime import datetime
 from random import randint, randrange
-from typing import Union, Sequence
+from typing import Union, Sequence, Iterable
 
 import hydra
 import ignite.distributed as idist
@@ -29,9 +28,10 @@ from toydet.utils import cuda_info, draw_bounding_boxes, mem_info, params_info
 from toydet.yolo_v3.models import YOLOv3
 from toydet.yolo_v3.datasets import CLASSES, VOCDetection_, get_dataloader
 
-manual_seed(666)
-logger = logging.getLogger()
+logger = setup_logger()
 device = idist.device()
+in_colab = "COLAB_TPU_ADDR" in os.environ
+with_torch_launch = "WORLD_SIZE" in os.environ
 
 
 class SequentialWithDict(nn.Module):
@@ -44,6 +44,31 @@ class SequentialWithDict(nn.Module):
             image, target = module(image, target)
 
         return image, target
+
+
+# --------------------------
+# train and eval transforms
+# --------------------------
+
+transforms_train = SequentialWithDict(
+    {
+        "LetterBox": LetterBox(416),
+        "RandomHorizontalFlipWithBBox": RandomHorizontalFlipWithBBox(),
+        "RandomVerticalFlipWithBBox": RandomVerticalFlipWithBBox(),
+    }
+)
+transforms_eval = SequentialWithDict({"LetterBox": LetterBox(416)})
+
+
+# ------------------------------
+# sanity checking evaluation
+# ------------------------------
+
+
+def sanity_check(engine: Engine, dataloader: Iterable, config: DictConfig):
+    engine.run(dataloader, max_epochs=1, epoch_length=config.sanity_check)
+    # set to None to use `epoch_length`
+    engine.state.max_epochs = None
 
 
 # -----------------
@@ -129,191 +154,207 @@ def evaluate_fn(
     return preds[:, 5:, :], target[:, 1]
 
 
-# # -----------------------
-# # train and eval engine
-# # -----------------------
-# engine_train = Engine(train_fn)
-# engine_eval = Engine(evaluate_fn)
-
-# # Precision(average=True, device=device).attach(engine_eval, "precision")
-# # Recall(average=True, device=device).attach(engine_eval, "recall")
-
-# # --------------------------
-# # train and eval transforms
-# # --------------------------
-
-# transforms_train = SequentialWithDict(
-#     {
-#         "LetterBox": LetterBox(416),
-#         "RandomHorizontalFlipWithBBox": RandomHorizontalFlipWithBBox(),
-#         "RandomVerticalFlipWithBBox": RandomVerticalFlipWithBBox(),
-#     }
-# )
-# transforms_eval = SequentialWithDict({"LetterBox": LetterBox(416)})
-
-# # ---------------------------
-# # train and eval dataloader
-# # ---------------------------
-# if config.sanity_check:  # for sanity checking
-#     dataloader_eval = get_dataloader(VOCDetection_, 2, "val", transforms_eval)
-
-#     @engine_train.on(Events.STARTED)
-#     def sanity_check():
-#         engine_eval.run(dataloader_eval, max_epochs=1, epoch_length=2)
-#         # set to None to use `epoch_length`
-#         engine_eval.state.max_epochs = None
+# Precision(average=True, device=device).attach(engine_eval, "precision")
+# Recall(average=True, device=device).attach(engine_eval, "recall")
 
 
-# if config.overfit_batches:  # for overfitting
-#     dataloader_train = get_dataloader(
-#         VOCDetection_, config.batch_size, "train", transforms_eval, overfit=True
-#     )
-#     engine_train.add_event_handler(
-#         Events.EPOCH_COMPLETED,
-#         lambda: engine_eval.run(
-#             dataloader_train, max_epochs=1, epoch_length=config.overfit_batches
-#         ),
-#     )
-# else:
-#     dataloader_train = get_dataloader(
-#         VOCDetection_, config.batch_size, "train", transforms_train
-#     )
-#     dataloader_eval = get_dataloader(
-#         VOCDetection_, config.batch_size, "val", transforms_eval
-#     )
-#     engine_train.add_event_handler(
-#         Events.EPOCH_COMPLETED, lambda: engine_eval.run(dataloader_eval, max_epochs=1)
-#     )
-
-# # -------------------------
-# # plot transformed images
-# # -------------------------
+# -------------------------
+# plot transformed images
+# -------------------------
 
 
-# @engine_train.on(Events.ITERATION_STARTED(every=config.log_train))
-# def plot_transformed_imgs(engine):
-#     img, target = engine.state.batch[0], engine.state.batch[1].numpy()
-#     idx = randrange(len(img))
-#     img = img[idx]
-#     mask = target[..., 0] == idx
-#     target = target[mask]
+def plot_transformed_imgs(engine, config):
+    img, target = engine.state.batch[0], engine.state.batch[1].numpy()
+    idx = randrange(len(img))
+    img = img[idx]
+    mask = target[..., 0] == idx
+    target = target[mask]
 
-#     if config.wandb and config.plot_img:
-#         box_data = []
-#         for t in target:
-#             class_id = int(t[1].item())
-#             box_data.append(
-#                 {
-#                     "position": {
-#                         "minX": t[2].item() / img.shape[-1],
-#                         "minY": t[3].item() / img.shape[-2],
-#                         "maxX": t[4].item() / img.shape[-1],
-#                         "maxY": t[5].item() / img.shape[-2],
-#                     },
-#                     "class_id": class_id,
-#                     "box_caption": CLASSES[class_id],
-#                 }
-#             )
-#         boxes = {
-#             "transforms": {
-#                 "box_data": box_data,
-#                 "class_labels": {k: v for k, v in enumerate(CLASSES)},
-#             }
-#         }
-#         wandb.log({"transforms": wandb.Image(to_pil_image(img, "RGB"), boxes=boxes)})
-#     elif not config.wandb and config.plot_img:
-#         boxes = target[..., 2:]
-#         labels = [CLASSES[int(label)] for label in target[..., 1].tolist()]
-#         colors = [
-#             (randint(0, 200), randint(0, 200), randint(0, 200))
-#             for _ in range(len(labels))
-#         ]
-#         img = draw_bounding_boxes(img, boxes, labels, colors)
-#         fig_name = datetime.now().isoformat() + ".png"
-#         img.save(fig_name, format="png")
-#         logger.info("Transformed image saved as %s", fig_name)
-
-
-# # pylint: disable=not-callable
-# log_train_events = Events.ITERATION_COMPLETED(
-#     every=config.log_train
-# ) | Events.ITERATION_COMPLETED(once=1)
-
-# if config.wandb:
-#     # --------------
-#     # wandb logger
-#     # --------------
-#     wb_logger = WandBLogger(config=config, name=config.model_name, project="yolov3")
-#     wb_logger.watch(net, log="gradients", log_freq=config.log_train)
-
-#     # --------------------------
-#     # logging training metrics
-#     # --------------------------
-#     wb_logger.attach_output_handler(
-#         engine_train,
-#         Events.ITERATION_COMPLETED(every=config.log_train),
-#         tag="train",
-#         output_transform=lambda output: output,
-#     )
-
-#     # ----------------------------
-#     # logging evaluation metrics
-#     # ----------------------------
-#     wb_logger.attach_output_handler(
-#         engine_eval,
-#         Events.EPOCH_COMPLETED(every=config.log_eval),  # pylint: disable=not-callable
-#         tag="eval",
-#         metric_names="all",
-#         global_step_transform=lambda *_: engine_train.state.iteration,
-#     )
+    if config.wandb and config.plot_img:
+        box_data = []
+        for t in target:
+            class_id = int(t[1].item())
+            box_data.append(
+                {
+                    "position": {
+                        "minX": t[2].item() / img.shape[-1],
+                        "minY": t[3].item() / img.shape[-2],
+                        "maxX": t[4].item() / img.shape[-1],
+                        "maxY": t[5].item() / img.shape[-2],
+                    },
+                    "class_id": class_id,
+                    "box_caption": CLASSES[class_id],
+                }
+            )
+        boxes = {
+            "transforms": {
+                "box_data": box_data,
+                "class_labels": {k: v for k, v in enumerate(CLASSES)},
+            }
+        }
+        wandb.log({"transforms": wandb.Image(to_pil_image(img, "RGB"), boxes=boxes)})
+    elif not config.wandb and config.plot_img:
+        boxes = target[..., 2:]
+        labels = [CLASSES[int(label)] for label in target[..., 1].tolist()]
+        colors = [
+            (randint(0, 200), randint(0, 200), randint(0, 200))
+            for _ in range(len(labels))
+        ]
+        img = draw_bounding_boxes(img, boxes, labels, colors)
+        fig_name = datetime.now().isoformat() + ".png"
+        img.save(fig_name, format="png")
+        logger.info("Transformed image saved as %s", fig_name)
 
 
-# # -----------------------
-# # log metrics to stdout
-# # -----------------------
-# def log_metrics(engine, mode, output):
-#     logger.info(
-#         "%s Epoch %i - Iteration %i : %s"
-#         % (mode, engine.state.epoch, engine.state.iteration, output),
-#     )
+# -----------------------
+# log metrics to stdout
+# -----------------------
 
 
-# engine_train.add_event_handler(
-#     log_train_events,
-#     lambda engine: log_metrics(engine, "Train", engine.state.output),
-# )
-
-# engine_eval.add_event_handler(
-#     # pylint: disable=not-callable
-#     Events.EPOCH_COMPLETED(every=config.log_eval),
-#     lambda engine: log_metrics(
-#         engine, "Eval", {k: v for k, v in sorted(engine.state.metrics.items())}
-#     ),
-# )
+def log_metrics(engine, mode, output):
+    logger.info(
+        "%s Epoch %i - Iteration %i : %s"
+        % (mode, engine.state.epoch, engine.state.iteration, output),
+    )
 
 
 def run(local_rank, config: DictConfig) -> None:
-    # --------------------------
-    # model, optimizer, device
-    # --------------------------
-    net = idist.auto_model(YOLOv3(config.img_size, config.num_classes))
+    manual_seed(config.seed)
+
+    # ------------------
+    # model, optimizer
+    # ------------------
+    net = idist.auto_model(YOLOv3(config.net.img_size, config.net.num_classes))
     optimizer = idist.auto_optim(optim.Adam(net.parameters(), lr=config.lr))
 
+    # -----------------------
+    # train and eval engine
+    # -----------------------
     engine_train = Engine(
         lambda engine, batch: train_fn(engine, batch, net, device, optimizer)
     )
-
     engine_eval = Engine(lambda engine, batch: evaluate_fn(engine, batch, net, device))
+
+    # pylint: disable=not-callable
+    engine_train.add_event_handler(
+        Events.ITERATION_STARTED(every=config.log_train),
+        plot_transformed_imgs,
+        config=config,
+    )
+
+    # pylint: disable=not-callable
+    log_train_events = Events.ITERATION_COMPLETED(
+        every=config.log_train
+    ) | Events.ITERATION_COMPLETED(once=1)
+
+    engine_train.add_event_handler(
+        log_train_events,
+        lambda engine: log_metrics(engine, "Train", engine.state.output),
+    )
+
+    engine_eval.add_event_handler(
+        # pylint: disable=not-callable
+        Events.EPOCH_COMPLETED(every=config.log_eval),
+        lambda engine: log_metrics(engine, "Eval", engine.state.metrics),
+    )
+
+    if config.wandb:
+        # --------------
+        # wandb logger
+        # --------------
+        name = f"bs{config.batch_size}-lr{config.lr}"
+        wb_logger = WandBLogger(config=config, name=name, project="yolov3")
+        wb_logger.watch(net, log="gradients", log_freq=config.log_train)
+
+        # --------------------------
+        # logging training metrics
+        # --------------------------
+        wb_logger.attach_output_handler(
+            engine_train,
+            Events.ITERATION_COMPLETED(every=config.log_train),
+            tag="train",
+            output_transform=lambda output: output,
+        )
+
+        # ----------------------------
+        # logging evaluation metrics
+        # ----------------------------
+        wb_logger.attach_output_handler(
+            engine_eval,
+            Events.EPOCH_COMPLETED(every=config.log_eval),
+            tag="eval",
+            metric_names="all",
+            global_step_transform=lambda *_: engine_train.state.iteration,
+        )
+
+    # ---------------------------
+    # train and eval dataloader
+    # ---------------------------
+    if config.sanity_check:  # for sanity checking
+        dataloader_eval = get_dataloader(VOCDetection_, 2, "val", transforms_eval)
+        engine_train.add_event_handler(
+            Events.STARTED,
+            sanity_check,
+            engine=engine_eval,
+            dataloader=dataloader_eval,
+            config=config,
+        )
+
+    if config.overfit_batches:  # for overfitting
+        dataloader_train = get_dataloader(
+            VOCDetection_, config.batch_size, "train", transforms_eval, overfit=True
+        )
+        engine_train.add_event_handler(
+            Events.EPOCH_COMPLETED,
+            lambda: engine_eval.run(
+                dataloader_train, max_epochs=1, epoch_length=config.overfit_batches
+            ),
+        )
+    else:
+        dataloader_train = get_dataloader(
+            VOCDetection_, config.batch_size, "train", transforms_train
+        )
+        dataloader_eval = get_dataloader(
+            VOCDetection_, config.batch_size, "val", transforms_eval
+        )
+        epoch_length_eval = (
+            config.epoch_length_eval
+            if isinstance(config.epoch_length_eval, int)
+            else round(len(dataloader_eval) * config.epoch_length_eval)
+        )
+        engine_train.add_event_handler(
+            Events.EPOCH_COMPLETED,
+            lambda: engine_eval.run(
+                dataloader_eval, max_epochs=1, epoch_length=epoch_length_eval
+            ),
+        )
+
+    epoch_length_train = (
+        config.epoch_length_train
+        if isinstance(config.epoch_length_train, int)
+        else round(len(dataloader_train) * config.epoch_length_train)
+    )
+
+    engine_train.run(
+        dataloader_train, max_epochs=config.max_epochs, epoch_length=epoch_length_train
+    )
 
 
 @hydra.main(config_path="../configs", config_name="defaults")
-def main(config: DictConfig) -> None:
+def main(config: DictConfig = None) -> None:
     logger.info("Running on %s ...", device)
     logger.info(OmegaConf.to_yaml(config))
     if "cuda" in device.type:
         name = cuda_info(logger, device)
 
-    with idist.Parallel(idist.backend(), idist.get_nproc_per_node()) as parallel:
+    if in_colab or with_torch_launch:
+        backend = idist.backend()
+        nproc_per_node = idist.get_nproc_per_node()
+    else:
+        backend = None
+        nproc_per_node = None
+
+    with idist.Parallel(backend=backend, nproc_per_node=nproc_per_node) as parallel:
         parallel.run(run, config)
 
     if "cuda" in device.type:

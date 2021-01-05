@@ -53,7 +53,7 @@ class VOCDetection_(VOCDetection):
 
     def __init__(
         self,
-        root: str = "./dataset",
+        root: str = "./datasets",
         year: str = "2012",
         image_set: str = "train",
         download: bool = False,
@@ -96,7 +96,7 @@ def collate_fn(batch):
 
 def get_dataloader(dataset, batch_size, split, transforms, overfit=False):
     is_train = split == "train"
-    ds = dataset(image_set=split, transforms=transforms)
+    ds = dataset(root="../../../datasets", image_set=split, transforms=transforms)
     return idist.auto_dataloader(
         ds,
         batch_size=batch_size,
