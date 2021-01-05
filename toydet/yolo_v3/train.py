@@ -291,7 +291,9 @@ def run(local_rank, config: DictConfig) -> None:
     # train and eval dataloader
     # ---------------------------
     if config.sanity_check:  # for sanity checking
-        dataloader_eval = get_dataloader(VOCDetection_, 2, "val", transforms_eval)
+        dataloader_eval = get_dataloader(
+            VOCDetection_, 2, config.path, "val", transforms_eval
+        )
         engine_train.add_event_handler(
             Events.STARTED,
             sanity_check,
@@ -302,7 +304,12 @@ def run(local_rank, config: DictConfig) -> None:
 
     if config.overfit_batches:  # for overfitting
         dataloader_train = get_dataloader(
-            VOCDetection_, config.batch_size, "train", transforms_eval, overfit=True
+            VOCDetection_,
+            config.batch_size,
+            config.path,
+            "train",
+            transforms_eval,
+            overfit=True,
         )
         engine_train.add_event_handler(
             Events.EPOCH_COMPLETED,
@@ -312,10 +319,10 @@ def run(local_rank, config: DictConfig) -> None:
         )
     else:
         dataloader_train = get_dataloader(
-            VOCDetection_, config.batch_size, "train", transforms_train
+            VOCDetection_, config.batch_size, config.path, "train", transforms_train
         )
         dataloader_eval = get_dataloader(
-            VOCDetection_, config.batch_size, "val", transforms_eval
+            VOCDetection_, config.batch_size, config.path, "val", transforms_eval
         )
         epoch_length_eval = (
             config.epoch_length_eval

@@ -94,9 +94,9 @@ def collate_fn(batch):
     return imgs, torch.cat(targets, dim=0)
 
 
-def get_dataloader(dataset, batch_size, split, transforms, overfit=False):
+def get_dataloader(dataset, batch_size, path, split, transforms, overfit=False):
     is_train = split == "train"
-    ds = dataset(root="../../../datasets", image_set=split, transforms=transforms)
+    ds = dataset(root=path, image_set=split, transforms=transforms)
     return idist.auto_dataloader(
         ds,
         batch_size=batch_size,
