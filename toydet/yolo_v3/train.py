@@ -263,7 +263,12 @@ def run(local_rank, config: DictConfig) -> None:
         # wandb logger
         # --------------
         name = f"bs{config.batch_size}-lr{config.lr}"
-        wb_logger = WandBLogger(config=config, name=name, project="yolov3", reinit=True)
+        wb_logger = WandBLogger(
+            config=OmegaConf.to_container(config),
+            name=name,
+            project="yolov3",
+            reinit=True,
+        )
         wb_logger.watch(net, log="gradients", log_freq=config.log_train)
 
         # --------------------------
