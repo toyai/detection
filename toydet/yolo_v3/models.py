@@ -2,7 +2,7 @@
 
 import logging
 from collections import OrderedDict
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import torch
 from ignite.distributed import device
@@ -403,20 +403,3 @@ class YOLOv3(nn.Module):
             )
         results = self.detector(results, target)
         return results
-
-
-def yolov3_darknet53_voc(
-    img_size: int = 416,
-    num_classes: int = 20,
-    pretrained: bool = False,
-):
-    net = YOLOv3(img_size=img_size, num_classes=num_classes)
-    return net
-
-
-# net = yolov3_darknet53_voc()
-# net.train()
-# t = torch.rand(1, 6)
-# y = net(torch.rand(1, 3, 416, 416), t)
-
-# print(y)

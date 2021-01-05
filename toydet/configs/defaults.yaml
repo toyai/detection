@@ -1,0 +1,41 @@
+# training and evaluation configs
+training:
+  # to use torch.cuda.amp
+  amp: false
+
+  # will be equally divided by number of GPUs if in distributed
+  batch_size: 2
+
+  # epoch_length of ignite.Engine.run() [int, float]
+  # if float, round(epoch_length * len(dataloader))
+  # if int, epoch_length
+  epoch_length: 1.0
+
+  # max_epochs of ignite.Engine.run()
+  max_epochs: 2
+
+  # learning rate used by torch.optim.*
+  lr: 1e-3
+
+  # logging interval of training iteration
+  log_train: 50
+
+  # logging interval of evaluation epoch
+  log_eval: 1
+
+  # try overfitting the model
+  overfit_batches: 0
+
+  # sanity checking the evaluation first in batches
+  sanity_check: 2
+
+  # used in ignite.utils.manual_seed()
+  seed: 666
+
+  # to use wandb or not for logging
+  wandb: false
+
+defaults:
+  - net: null
+  - override hydra/job_logging: colorlog
+  - override hydra/hydra_logging: colorlog

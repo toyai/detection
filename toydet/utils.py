@@ -59,7 +59,7 @@ def draw_bounding_boxes(
     return image
 
 
-def cuda_info(logger: Logger, device: torch.device):
+def cuda_info(logger: Logger, device: torch.device) -> str:
     devices = torch.cuda.device_count()
     devices = os.getenv(
         "CUDA_VISIBLE_DEVICES", ",".join([str(i) for i in range(devices)])
@@ -71,7 +71,7 @@ def cuda_info(logger: Logger, device: torch.device):
     return prop.name
 
 
-def mem_info(logger: Logger, device: torch.device, name: str):
+def mem_info(logger: Logger, device: torch.device, name: str) -> None:
     MB = 1024.0 * 1024.0
     logger.info("%s allocated %s MB" % (name, torch.cuda.memory_allocated(device) / MB))
     logger.info(
@@ -81,3 +81,10 @@ def mem_info(logger: Logger, device: torch.device, name: str):
     logger.info(
         "%s reserved max %s MB" % (name, torch.cuda.max_memory_reserved(device) / MB)
     )
+
+
+def params_info(logger: Logger, net: torch.nn.Module) -> None:
+    params = sum(p.numel() for p in net.parameters())
+    gradients = sum(p.numel() for p in net.parameters() if p.requires_grad)
+    logger.info("Number of parameters: %g", params)
+    logger.info("Number of gradients: %g", gradients)

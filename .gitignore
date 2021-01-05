@@ -138,3 +138,7 @@ wandb
 
 # output
 predictions
+
+# hydra
+outputs
+multirun

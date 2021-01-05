@@ -1,6 +1,5 @@
 """VOC Dataset."""
 
-import os
 import xml.etree.ElementTree as ET
 from multiprocessing import cpu_count
 from typing import Callable, List, Optional, Tuple
@@ -54,7 +53,7 @@ class VOCDetection_(VOCDetection):
 
     def __init__(
         self,
-        root: str = os.getcwd(),
+        root: str = "./dataset",
         year: str = "2012",
         image_set: str = "train",
         download: bool = False,
@@ -104,5 +103,4 @@ def get_dataloader(dataset, batch_size, split, transforms, overfit=False):
         shuffle=is_train and not overfit,
         collate_fn=collate_fn,
         num_workers=cpu_count(),
-        pin_memory=torch.cuda.is_available(),
     )
