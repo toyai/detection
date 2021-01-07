@@ -1,3 +1,7 @@
+# ------------------------------
+# General NN training configs
+# ------------------------------
+
 # to use torch.cuda.amp
 amp: false
 
@@ -9,6 +13,9 @@ batch_size: 2
 # if int, epoch_length
 epoch_length_train: 1.0
 epoch_length_eval: 1.0
+
+# num_workers for DataLoader
+j: 0
 
 # max_epochs of ignite.Engine.run()
 max_epochs: 2
@@ -29,7 +36,7 @@ overfit_batches: 0
 path: null
 
 # plot the transformed image
-plot_img: false
+save_plot_img: false
 
 # sanity checking the evaluation first in batches
 sanity_check: 2
@@ -43,3 +50,18 @@ wandb: false
 defaults:
   - net: null
   - override hydra/job_logging: minimal
+
+# -----------------------
+# Distributed configs
+# -----------------------
+
+# The number of processes to launch on each node, for GPU training
+# this is recommended to be set to the number of GPUs in your system
+# so that each process can be bound to a single GPU
+nproc_per_node: null
+
+# The number of nodes to use for distributed training
+nnodes: null
+
+# The rank of the node for multi-node distributed training
+node_rank: null

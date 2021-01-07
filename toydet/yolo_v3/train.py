@@ -1,6 +1,5 @@
 import logging
 import os
-from argparse import ArgumentParser
 from collections import OrderedDict
 from datetime import datetime
 from random import randint, randrange
@@ -26,7 +25,7 @@ from toydet.transforms import (
 )
 from toydet.utils import cuda_info, draw_bounding_boxes, mem_info, params_info
 from toydet.yolo_v3.models import YOLOv3
-from toydet.yolo_v3.datasets import CLASSES, VOCDetection_, get_dataloader
+from toydet.yolo_v3.datasets import CLASSES, VOCDetection_, collate_fn
 
 logger = setup_logger()
 device = idist.device()
@@ -49,7 +48,6 @@ class SequentialWithDict(nn.Module):
 # --------------------------
 # train and eval transforms
 # --------------------------
-
 transforms_train = SequentialWithDict(
     {
         "LetterBox": LetterBox(416),
@@ -218,7 +216,7 @@ def log_metrics(engine, mode, output):
     )
 
 
-def run(local_rank, config: DictConfig) -> None:
+def run(local_rank: int, config: DictConfig) -> None:
     manual_seed(config.seed)
 
     # ------------------
@@ -226,6 +224,16 @@ def run(local_rank, config: DictConfig) -> None:
     # ------------------
     net = idist.auto_model(YOLOv3(config.net.img_size, config.net.num_classes))
     optimizer = idist.auto_optim(optim.Adam(net.parameters(), lr=config.lr))
+    params_info(logger, net)
+
+    # -----------------------------------------
+    # Events for logging train and eval info
+    # -----------------------------------------
+    # pylint: disable=not-callable
+    log_train_events = Events.ITERATION_COMPLETED(
+        lambda _, event: event % config.log_train == 0 or event == 1
+    )
+    log_eval_events = Events.EPOCH_COMPLETED(every=config.log_eval)
 
     # -----------------------
     # train and eval engine
@@ -242,19 +250,13 @@ def run(local_rank, config: DictConfig) -> None:
         config=config,
     )
 
-    # pylint: disable=not-callable
-    log_train_events = Events.ITERATION_COMPLETED(
-        every=config.log_train
-    ) | Events.ITERATION_COMPLETED(once=1)
-
     engine_train.add_event_handler(
         log_train_events,
         lambda engine: log_metrics(engine, "Train", engine.state.output),
     )
 
     engine_eval.add_event_handler(
-        # pylint: disable=not-callable
-        Events.EPOCH_COMPLETED(every=config.log_eval),
+        log_eval_events,
         lambda engine: log_metrics(engine, "Eval", engine.state.metrics),
     )
 
@@ -276,7 +278,7 @@ def run(local_rank, config: DictConfig) -> None:
         # --------------------------
         wb_logger.attach_output_handler(
             engine_train,
-            Events.ITERATION_COMPLETED(every=config.log_train),
+            log_train_events,
             tag="train",
             output_transform=lambda output: output,
         )
@@ -286,7 +288,7 @@ def run(local_rank, config: DictConfig) -> None:
         # ----------------------------
         wb_logger.attach_output_handler(
             engine_eval,
-            Events.EPOCH_COMPLETED(every=config.log_eval),
+            log_eval_events,
             tag="eval",
             metric_names="all",
             global_step_transform=lambda *_: engine_train.state.iteration,
@@ -295,9 +297,18 @@ def run(local_rank, config: DictConfig) -> None:
     # ---------------------------
     # train and eval dataloader
     # ---------------------------
+    dataset_eval = VOCDetection_(
+        config.path, image_set="val", transforms=transforms_eval
+    )
+    dataset_train = VOCDetection_(config.path, transforms=transforms_train)
+
     if config.sanity_check:  # for sanity checking
-        dataloader_eval = get_dataloader(
-            VOCDetection_, 2, config.path, "val", transforms_eval
+        dataloader_eval = idist.auto_dataloader(
+            dataset_eval,
+            bach_size=config.batch_size,
+            shuffle=False,
+            collate_fn=collate_fn,
+            num_workers=config.j,
         )
         engine_train.add_event_handler(
             Events.STARTED,
@@ -308,13 +319,12 @@ def run(local_rank, config: DictConfig) -> None:
         )
 
     if config.overfit_batches:  # for overfitting
-        dataloader_train = get_dataloader(
-            VOCDetection_,
-            config.batch_size,
-            config.path,
-            "train",
-            transforms_eval,
-            overfit=True,
+        dataloader_train = idist.auto_dataloader(
+            dataset_train,
+            bach_size=config.batch_size,
+            shuffle=False,
+            collate_fn=collate_fn,
+            num_workers=config.j,
         )
         engine_train.add_event_handler(
             Events.EPOCH_COMPLETED,
@@ -323,11 +333,19 @@ def run(local_rank, config: DictConfig) -> None:
             ),
         )
     else:
-        dataloader_train = get_dataloader(
-            VOCDetection_, config.batch_size, config.path, "train", transforms_train
+        dataloader_train = idist.auto_dataloader(
+            dataset_train,
+            bach_size=config.batch_size,
+            shuffle=True,
+            collate_fn=collate_fn,
+            num_workers=config.j,
         )
-        dataloader_eval = get_dataloader(
-            VOCDetection_, config.batch_size, config.path, "val", transforms_eval
+        dataloader_eval = idist.auto_dataloader(
+            dataset_eval,
+            bach_size=config.batch_size,
+            shuffle=False,
+            collate_fn=collate_fn,
+            num_workers=config.j,
         )
         epoch_length_eval = (
             config.epoch_length_eval
@@ -363,14 +381,12 @@ def main(config: DictConfig = None) -> None:
         name = cuda_info(logger, device)
 
     if in_colab or with_torch_launch:
-        backend = idist.backend()
-        nproc_per_node = idist.get_nproc_per_node()
+        with idist.Parallel(
+            idist.backend(), config.nproc_per_node, config.nnodes, config.node_rank
+        ) as parallel:
+            parallel.run(run, config)
     else:
-        backend = None
-        nproc_per_node = None
-
-    with idist.Parallel(backend=backend, nproc_per_node=nproc_per_node) as parallel:
-        parallel.run(run, config)
+        run(None, config)
 
     if "cuda" in device.type:
         mem_info(logger, device, name)
