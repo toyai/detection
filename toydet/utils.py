@@ -26,8 +26,6 @@ def draw_bounding_boxes(
         image = to_pil_image(image, "RGB")
     elif isinstance(image, np.ndarray):
         image = Image.fromarray(image, "RGB")
-    elif image.dim() != 3:
-        raise ValueError("Pass individual images, not batches")
 
     if isinstance(boxes, torch.Tensor):
         boxes = boxes.to(torch.int64).tolist()

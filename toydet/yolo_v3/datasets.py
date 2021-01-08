@@ -1,10 +1,8 @@
 """VOC Dataset."""
 
 import xml.etree.ElementTree as ET
-from multiprocessing import cpu_count
 from typing import Callable, List, Optional, Tuple
 
-import ignite.distributed as idist
 import numpy as np
 import torch
 from PIL import Image
@@ -56,7 +54,7 @@ class VOCDetection_(VOCDetection):
         root: str = "./datasets",
         year: str = "2012",
         image_set: str = "train",
-        download: bool = False,
+        download: bool = True,
         transforms: Optional[Callable] = None,
     ):
         super().__init__(root, year, image_set, download)
