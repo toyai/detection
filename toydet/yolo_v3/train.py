@@ -226,7 +226,7 @@ def log_metrics(engine, mode, output):
     )
     if "cuda" in device.type:
         logger.info(
-            "Memory: %s MB", torch.cuda.max_memory_allocated(device) / 1024.0 * 1024.0
+            "Memory: %s MB", torch.cuda.max_memory_allocated(device) / (1024.0 * 1024.0)
         )
 
 
@@ -328,7 +328,6 @@ def run(local_rank: int, config: DictConfig) -> None:
             shuffle=False,
             collate_fn=collate_fn,
             num_workers=config.j,
-            persistent_workers=True,
         )
         engine_train.add_event_handler(
             Events.STARTED,
@@ -345,7 +344,6 @@ def run(local_rank: int, config: DictConfig) -> None:
             shuffle=False,
             collate_fn=collate_fn,
             num_workers=config.j,
-            persistent_workers=True,
         )
         engine_train.add_event_handler(
             Events.EPOCH_COMPLETED,
@@ -360,7 +358,6 @@ def run(local_rank: int, config: DictConfig) -> None:
             shuffle=True,
             collate_fn=collate_fn,
             num_workers=config.j,
-            persistent_workers=True,
         )
         dataloader_eval = idist.auto_dataloader(
             dataset_eval,
@@ -368,7 +365,6 @@ def run(local_rank: int, config: DictConfig) -> None:
             shuffle=False,
             collate_fn=collate_fn,
             num_workers=config.j,
-            persistent_workers=True,
         )
         epoch_length_eval = (
             config.epoch_length_eval
