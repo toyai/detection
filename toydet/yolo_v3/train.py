@@ -83,30 +83,12 @@ def train_fn(
     img = batch[0].to(device, non_blocking=True)
     target = batch[1].to(device, non_blocking=True)
     loss_dict, total_loss = net(img, target)
-    # losses = sum(loss["loss/total"] for loss in losses_list)
-    # loss_dict = {
-    #     "epoch": engine.state.epoch,
-    #     'loss/xywh'
-    # "loss/xywh/0": losses_list[0]["loss/xywh"],
-    # "loss/xywh/1": losses_list[1]["loss/xywh"],
-    # "loss/xywh/2": losses_list[2]["loss/xywh"],
-    # "loss/cls/0": losses_list[0]["loss/cls"],
-    # "loss/cls/1": losses_list[1]["loss/cls"],
-    # "loss/cls/2": losses_list[2]["loss/cls"],
-    # "loss/conf/0": losses_list[0]["loss/conf"],
-    # "loss/conf/1": losses_list[1]["loss/conf"],
-    # "loss/conf/2": losses_list[2]["loss/conf"],
-    # "loss/total": losses.detach().cpu().item(),
-    # "ious/0": ious_scores_1,
-    # "ious/1": ious_scores_2,
-    # "ious/2": ious_scores_3,
-    # }
-    loss_dict["epoch"] = engine.state.epoch
 
     total_loss.backward()
     optimizer.step()
     optimizer.zero_grad()
 
+    loss_dict["epoch"] = engine.state.epoch
     return {k: v for k, v in sorted(loss_dict.items())}
 
 

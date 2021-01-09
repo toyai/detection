@@ -54,7 +54,7 @@ class VOCDetection_(VOCDetection):
         root: str = "./datasets",
         year: str = "2012",
         image_set: str = "train",
-        download: bool = True,
+        download: bool = False,
         transforms: Optional[Callable] = None,
     ):
         super().__init__(root, year, image_set, download)
