@@ -272,7 +272,6 @@ def run(local_rank: int, config: DictConfig) -> None:
             project="yolov3",
             reinit=True,
         )
-        wb_logger.watch(net, log="gradients", log_freq=config.log_train)
 
         # --------------------------
         # logging training metrics
