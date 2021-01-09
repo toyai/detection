@@ -108,9 +108,9 @@ def evaluate_fn(
     img = batch[0].to(device, non_blocking=True)
     target = batch[1].to(device, non_blocking=True)
     preds = net(img)
-    preds = torch.cat(preds, dim=1)
-    conf_mask = (preds[:, :, 4] > conf_threshold).float().unsqueeze(-1)
-    preds = preds * conf_mask
+    # preds = torch.cat(preds, dim=1)
+    # conf_mask = (preds[:, :, 4] > conf_threshold).float().unsqueeze(-1)
+    # preds = preds * conf_mask
     # print(preds[..., 5:].shape)
     # print(preds[..., 5:])
     # exit(1)
@@ -306,7 +306,7 @@ def run(local_rank: int, config: DictConfig) -> None:
     if config.sanity_check:  # for sanity checking
         dataloader_eval = idist.auto_dataloader(
             dataset_eval,
-            batch_size=config.batch_size,
+            batch_size=2,
             shuffle=False,
             collate_fn=collate_fn,
             num_workers=config.j,
