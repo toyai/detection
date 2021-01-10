@@ -251,7 +251,7 @@ class YOLOLayer(nn.Module):
             target = torch.cat(
                 (target[..., :2], target[..., 2:] * self.grid_size), dim=-1
             )
-            return self.build_targets(pred, target)
+            return self.get_pred_and_target(pred, target)
 
         rel_bbox, rel_conf, rel_cls = torch.split(
             pred, (4, 1, self.num_classes), dim=-1
@@ -274,7 +274,7 @@ class YOLOLayer(nn.Module):
             0,
         )
 
-    def build_targets(
+    def get_pred_and_target(
         self,
         pred: Tensor,
         target: Tensor,
@@ -400,7 +400,7 @@ class Detector(nn.Module):
                     result_target["cls"].append(yolo_target["cls"])
                 else:
                     result_pred.append(yolo_pred)
-                    result_target.append(yolo_target)
+                    # result_target.append(yolo_target)
             elif "conv_block" in name:
                 output = module(tip)
             elif "upsample" in name:

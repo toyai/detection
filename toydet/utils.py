@@ -1,4 +1,5 @@
 import os
+from collections import OrderedDict
 from logging import Logger
 from random import randint
 from typing import Optional, Sequence, Tuple, Union
@@ -86,3 +87,15 @@ def params_info(logger: Logger, net: torch.nn.Module) -> None:
     gradients = sum(p.numel() for p in net.parameters() if p.requires_grad)
     logger.info("Number of parameters: %g", params)
     logger.info("Number of gradients: %g", gradients)
+
+
+class SequentialWithDict(torch.nn.Module):
+    def __init__(self, transforms: Union[dict, OrderedDict]):
+        super().__init__()
+        self.transforms = torch.nn.ModuleDict(transforms)
+
+    def forward(self, image, target):
+        for _, module in self.transforms.items():
+            image, target = module(image, target)
+
+        return image, target

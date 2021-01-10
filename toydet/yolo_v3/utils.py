@@ -14,26 +14,6 @@ def box_iou_wh(wh1, wh2):
     return inter_area / union_area
 
 
-def yolo_loss(pred, target: Tensor, stride, anchors):
-    pred_bbox, pred_conf, pred_cls = pred
-
-    obj_mask, target_bbox, target_conf, target_cls = build_targets(
-        pred, target, stride, anchors
-    )
-
-    loss_xywh = F.mse_loss(
-        torch.masked_select(pred_bbox, obj_mask),
-        torch.masked_select(target_bbox, obj_mask),
-    )
-    loss_cls = F.cross_entropy(pred_cls.permute(0, 2, 1, 3, 4), target_cls)
-    loss_conf = F.binary_cross_entropy_with_logits(
-        torch.masked_select(pred_conf, obj_mask),
-        torch.masked_select(target_conf, obj_mask),
-    )
-
-    return loss_xywh, loss_conf, loss_cls
-
-
 def get_abs_yolo_bbox(t_bbox: Tensor, anchors: Tensor):
     # t_bbox: [batch, num_anchors, grid_size, grid_size, 4]
     t_xy, t_wh = torch.split(t_bbox, (2, 2), dim=-1)
