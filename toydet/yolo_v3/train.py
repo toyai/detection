@@ -318,16 +318,14 @@ epoch_length_train = (
 )
 
 
-if config.wandb:
-    wb_logger.finish()
-
-
 def run(local_rank):
     engine_train.run(
         dataloader_train,
         max_epochs=config.max_epochs,
         epoch_length=epoch_length_train,
     )
+    if config.wandb:
+        wb_logger.finish()
 
 
 if __name__ == "__main__":
