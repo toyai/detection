@@ -1,13 +1,24 @@
+import logging
 import os
-from collections import OrderedDict
+from argparse import Namespace
+from datetime import datetime
 from logging import Logger
 from random import randint
-from typing import Optional, Sequence, Tuple, Union
+from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 
+import ignite.distributed as idist
 import numpy as np
 import torch
+from torch.nn import Module
+from ignite.contrib.handlers import WandBLogger
+from ignite.engine import Engine
+from ignite.utils import setup_logger
 from PIL import Image, ImageDraw, ImageFont
+from torch.optim import Optimizer
+from torch.utils.data import Dataset, DataLoader
 from torchvision.transforms.functional import to_pil_image
+
+logger = logging.getLogger()
 
 # adapted from https://github.com/pytorch/vision/blob/master/torchvision/utils.py#L138
 # for allowing ndarray and PIL.Image
@@ -58,44 +69,180 @@ def draw_bounding_boxes(
     return image
 
 
-def cuda_info(logger: Logger, device: torch.device) -> str:
-    devices = torch.cuda.device_count()
-    devices = os.getenv(
-        "CUDA_VISIBLE_DEVICES", ",".join([str(i) for i in range(devices)])
-    )
-    logger.info("CUDA_VISIBLE_DEVICES - %s", devices)
-    prop = torch.cuda.get_device_properties(device=device)
-    logger.info("%s - %s" % (prop, device))
+def cuda_info(device: torch.device) -> None:
+    """Log cuda info about given ``device``.
 
-    return prop.name
-
-
-def mem_info(logger: Logger, device: torch.device, name: str) -> None:
-    MB = 1024.0 * 1024.0
-    logger.info("%s allocated %s MB" % (name, torch.cuda.memory_allocated(device) / MB))
-    logger.info(
-        "%s allocated max %s MB" % (name, torch.cuda.max_memory_allocated(device) / MB)
-    )
-    logger.info("%s reserved %s MB" % (name, torch.cuda.memory_reserved(device) / MB))
-    logger.info(
-        "%s reserved max %s MB" % (name, torch.cuda.max_memory_reserved(device) / MB)
-    )
+    Args:
+        device (torch.device): current torch.device.
+    """
+    if "cuda" in device.type:
+        devices = torch.cuda.device_count()
+        devices = os.getenv(
+            "CUDA_VISIBLE_DEVICES", ",".join([str(i) for i in range(devices)])
+        )
+        prop = torch.cuda.get_device_properties(device=device)
+        logger.info(f"CUDA_VISIBLE_DEVICES - {devices}\n\t{prop} - {device}")
 
 
-def params_info(logger: Logger, net: torch.nn.Module) -> None:
+def mem_info(device: torch.device) -> None:
+    """Log PyTorch Memory Consumption at given ``device``.
+
+    Args:
+        device (torch.device): current torch.device.
+    """
+    if "cuda" in device.type:
+        MB = 1024.0 * 1024.0
+        memformat = """
+        Memory allocated {1} MB
+        Max Memory allocated {2} MB
+        Memory reserved {3} MB
+        Max Memory reserved {4} MB"""
+
+        logger.info(
+            memformat.format(
+                torch.cuda.memory_allocated(device) / MB,
+                torch.cuda.max_memory_allocated(device) / MB,
+                torch.cuda.memory_reserved(device) / MB,
+                torch.cuda.max_memory_reserved(device) / MB,
+            ),
+        )
+
+
+def params_info(net: Module) -> None:
+    """Log Parameters and Gradients of given ``net``.
+
+    Args:
+        net (Module): model which to get parameters and gradients.
+    """
     params = sum(p.numel() for p in net.parameters())
     gradients = sum(p.numel() for p in net.parameters() if p.requires_grad)
-    logger.info("Number of parameters: %g", params)
-    logger.info("Number of gradients: %g", gradients)
+    logger.info("Parameters {:,} - Gradients {:,}".format(params, gradients))
 
 
-class SequentialWithDict(torch.nn.Module):
-    def __init__(self, transforms: Union[dict, OrderedDict]):
-        super().__init__()
-        self.transforms = torch.nn.ModuleDict(transforms)
+def sanity_check(engine: Engine, dataloader: Iterable, config: Namespace) -> None:
+    """Sanity checking with eval dataloader.
 
-    def forward(self, image, target):
-        for _, module in self.transforms.items():
-            image, target = module(image, target)
+    Args:
+        engine (Engine): instance of ``Engine`` to run sanity check.
+        dataloader (Iterable): ``data`` argument of ``engine.run()``.
+        config (Namespace): config namespace object.
+    """
+    logger.info("Sanity checking with %i iterations." % config.sanity_check)
+    engine.run(dataloader, max_epochs=1, epoch_length=config.sanity_check)
+    # set to None to use `epoch_length`
+    engine.state.max_epochs = None
 
-        return image, target
+
+def log_metrics(engine: Engine, tag: str, device: torch.device) -> None:
+    """Log ``engine.state.output`` and ``engine.state.metrics`` with given ``engine``
+    and memory info with given ``device``.
+
+    Args:
+        engine (Engine): instance of ``Engine`` which metrics to log.
+        tag (str): a string to add at the start of output.
+        device (torch.device): current torch.device to log memory info.
+    """
+    metrics_format = f"""{tag} Epoch {engine.state.epoch} - Iteration {engine.state.iteration}
+    Output: {engine.state.output}
+    Metrics: {engine.state.metrics}"""
+    logger.info(metrics_format)
+    mem_info(device)
+
+
+def get_dataloaders(
+    dataset_train: Dataset,
+    dataset_eval: Dataset,
+    config: Namespace,
+) -> Tuple[DataLoader]:
+    """Return ``dataloader_train`` and ``dataloader_eval`` at given config.
+
+    Args:
+        dataset_train (Dataset): train dataset.
+        dataset_eval (Dataset): eval dataset.
+        config (Namespace): config namespace object.
+
+    Returns:
+        Tuple[DataLoader]: dataloader_train, dataloader_eval
+    """
+    dataloader_train = idist.auto_dataloader(
+        dataset_train,
+        batch_size=config.batch_size,
+        shuffle=not config.overfit_batches,
+        num_workers=config.j,
+        collate_fn=getattr(dataset_train, "collate_fn", None),
+        drop_last=config.drop_last,
+    )
+    dataloader_eval = idist.auto_dataloader(
+        dataset_eval,
+        batch_size=config.batch_size,
+        shuffle=False,
+        num_workers=config.j,
+        collate_fn=getattr(dataset_eval, "collate_fn", None),
+        drop_last=config.drop_last,
+    )
+    return dataloader_train, dataloader_eval
+
+
+def setup_logging(optimizer: Optimizer, config: Namespace) -> Tuple[Logger, str]:
+    """Setup logger with ``ignite.utils.setup_logger()``.
+
+    Args:
+        optimizer (Optimizer): Wrapped optimizer.
+        config (Namespace): config namespace object.
+
+    Returns:
+        Tuple[Logger, str]: instance of ``Logger`` and name
+    """
+    name = f"bs{config.batch_size}-lr{config.lr}-{optimizer.__class__.__name__}"
+    now = datetime.now().strftime("%Y-%m-%d-%X")
+    logger = setup_logger(
+        level=logging.INFO if config.verbose else logging.WARNING,
+        format="%(levelname)s: %(message)s",
+        filepath=config.filepath / f"{name}-{now}.log",
+    )
+
+    return logger, name
+
+
+def get_wandb_logger(
+    config: Namespace,
+    name: str,
+    engine_train: Engine,
+    engine_eval: Engine,
+    log_train_events: Any,
+    log_eval_events: Any,
+) -> WandBLogger:
+    """Setup ``WandBLogger`` from ignite.
+
+    Args:
+        config (Namespace): config namespace object.
+        name (str): ``name`` keyword argument of ``WandBLogger``
+        engine_train (Engine): engine for training.
+        engine_eval (Engine): engine for evaluating.
+        log_train_events (Any): Events of training to log.
+        log_eval_events (Any): Events of evaluation to log.
+
+    Returns:
+        WandBLogger: instance of ``WandBLogger``
+    """
+    wb_logger = WandBLogger(
+        config=config,
+        name=name,
+        project="yolov3",
+        reinit=True,
+    )
+    wb_logger.attach_output_handler(
+        engine_train,
+        log_train_events,
+        tag="train",
+        output_transform=lambda output: output,
+    )
+    wb_logger.attach_output_handler(
+        engine_eval,
+        log_eval_events,
+        tag="eval",
+        metric_names="all",
+        global_step_transform=lambda *_: engine_train.state.iteration,
+    )
+
+    return wb_logger

@@ -81,12 +81,12 @@ class VOCDetection_(VOCDetection):
 
         return img, torch.from_numpy(targets)  # pylint: disable=not-callable
 
+    @staticmethod
+    def collate_fn(batch):
+        imgs, targets = zip(*batch)
+        imgs = [to_tensor(img) for img in imgs]
+        imgs = torch.stack(imgs, dim=0)
+        for idx, target in enumerate(targets):
+            target[:, 0] = idx
 
-def collate_fn(batch):
-    imgs, targets = zip(*batch)
-    imgs = [to_tensor(img) for img in imgs]
-    imgs = torch.stack(imgs, dim=0)
-    for idx, target in enumerate(targets):
-        target[:, 0] = idx
-
-    return imgs, torch.cat(targets, dim=0)
+        return imgs, torch.cat(targets, dim=0)

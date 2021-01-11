@@ -1,4 +1,5 @@
 import random
+from collections import OrderedDict
 from typing import Tuple, Union
 
 import numpy as np
@@ -74,3 +75,15 @@ class RandomVerticalFlipWithBBox(nn.Module):
 
     def __repr__(self):
         return self.__class__.__name__ + "(p={})".format(self.prob)
+
+
+class SequentialWithDict(nn.Module):
+    def __init__(self, transforms: Union[dict, OrderedDict]):
+        super().__init__()
+        self.transforms = nn.ModuleDict(transforms)
+
+    def forward(self, image, target):
+        for _, module in self.transforms.items():
+            image, target = module(image, target)
+
+        return image, target

@@ -136,10 +136,5 @@ VOCdevkit
 # logger
 wandb
 
-# output
-datasets
-predictions
-
-# hydra
-outputs
-multirun
+# logs
+logs

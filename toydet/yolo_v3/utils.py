@@ -2,7 +2,6 @@
 
 import torch
 from torch import Tensor
-from torchvision.ops import box_convert, box_iou
 
 
 def box_iou_wh(wh1, wh2):
@@ -66,62 +65,3 @@ def get_abs_yolo_bbox(t_bbox: Tensor, anchors: Tensor):
     # bh = exp(th) * ph
     b_wh = torch.exp(t_wh) * grid_wh
     return torch.cat((b_xy, b_wh), dim=-1)
-
-
-def build_targets(
-    pred: Tensor, target: Tensor, anchors: Tensor, iou_ignore_threshold: float = 0.5
-):
-    pred_bbox, pred_conf, pred_cls = torch.split(pred, (4, 1, 20), dim=-1)
-    target_bbox = torch.zeros_like(pred_bbox)
-    target_cls = torch.zeros_like(pred_cls)
-    # ious_scores = torch.zeros_like(pred_cls, device=pred_cls.device)
-    obj_mask = torch.zeros_like(pred_conf, dtype=torch.bool)
-    noobj_mask = torch.ones_like(pred_conf, dtype=torch.bool)
-
-    cxcy_t = torch.narrow(target, dim=-1, start=2, length=2)
-    wh_t = torch.narrow(target, dim=-1, start=4, length=2)
-    ious = torch.stack([box_iou_wh(anchor, wh_t) for anchor in anchors], dim=0)
-    _, idx = torch.max(ious, 0)
-    batch, labels = torch.narrow(target, dim=-1, start=0, length=2).long().t()
-    width, height = cxcy_t.long().t()
-
-    # obj_mask = 1 => there is obj
-    # obj_mask = 0 => there is no obj
-    obj_mask[batch, idx, height, width, :] = 1
-    # noobj_mask = 1 => there is no obj
-    # noobj_mask = 0 => there is obj
-    noobj_mask[batch, idx, height, width, :] = 0
-    for i, iou in enumerate(ious.t()):
-        noobj_mask[batch[i], iou > iou_ignore_threshold, height[i], width[i], :] = 0
-
-    target_xy = target[..., 2:4] - torch.floor(target[..., 2:4])
-    target_wh = torch.log(target[..., 4:] / anchors[idx])
-    target_bbox = torch.cat((target_xy, target_wh), dim=-1)
-    # target_bbox[batch, idx, height, width, :2] = cxcy_t - torch.floor(cxcy_t)
-    # target_bbox[batch, idx, height, width, 2:] = torch.log(wh_t / anchors[idx] + 1e-16)
-    target_cls[batch, idx, height, width, labels] = 1.0
-    # ious_scores[batch, idx, :, height, width] = box_iou(pred_bbox, target_bbox)
-
-    target_conf = obj_mask.float()
-    # pred_bbox = torch.masked_select(pred_bbox, obj_mask)
-    pred_cls = torch.masked_select(pred_cls, obj_mask)
-    pred_obj = torch.masked_select(pred_conf, obj_mask)
-    pred_noobj = torch.masked_select(pred_conf, noobj_mask)
-    # target_bbox = torch.masked_select(target_bbox, obj_mask)
-    target_cls = torch.masked_select(target_cls, obj_mask)
-    target_obj = torch.masked_select(target_conf, obj_mask)
-    target_noobj = torch.masked_select(target_conf, noobj_mask)
-
-    pred = {
-        "bbox": pred_bbox[batch, idx, height, width, :],
-        "cls": torch.sigmoid(pred_cls),
-        "obj": pred_obj,
-        "noobj": pred_noobj,
-    }
-    target = {
-        "bbox": target_bbox,
-        "cls": target_cls,
-        "obj": target_obj,
-        "noobj": target_noobj,
-    }
-    return pred, target

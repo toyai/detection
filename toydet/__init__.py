@@ -8,7 +8,9 @@ __version__ = "0.1.0"
 
 
 from argparse import ArgumentParser
-from typing import Union
+
+import torch
+from ignite.distributed import device
 
 DEFAULTS = {
     "amp": {
@@ -20,17 +22,37 @@ DEFAULTS = {
         "type": int,
         "help": "will be equally divided by number of GPUs if in distributed",
     },
+    "dataset_path": {
+        "default": "./datasets",
+        "type": str,
+        "help": "datasets path",
+    },
+    "device": {
+        "default": device(),
+        "type": torch.device,
+        "help": "device to use for training / evaluation / testing",
+    },
+    "drop_last": {
+        "default": False,
+        "type": bool,
+        "help": "set to True to drop the last incomplete batch",
+    },
     "epoch_length_train": {
         "default": 1.0,
-        "type": Union[float, int],
+        "type": float,
         "help": """epoch_length of ignite.Engine.run() [int, float] if float,
                     round(epoch_length * len(dataloader)) if int, epoch_length""",
     },
     "epoch_length_eval": {
         "default": 1.0,
-        "type": Union[float, int],
+        "type": float,
         "help": """epoch_length of ignite.Engine.run() [int, float] if float,
                     round(epoch_length * len(dataloader)) if int, epoch_length""",
+    },
+    "filepath": {
+        "default": "logs",
+        "type": str,
+        "help": "logging file path.",
     },
     "j": {
         "default": 0,
@@ -62,11 +84,6 @@ DEFAULTS = {
         "type": int,
         "help": "try overfitting the model",
     },
-    "path": {
-        "default": "./datasets",
-        "type": str,
-        "help": "datasets path",
-    },
     "save_img": {
         "default": False,
         "type": bool,
@@ -87,10 +104,16 @@ DEFAULTS = {
         "type": bool,
         "help": "to use wandb or not",
     },
+    "verbose": {
+        "action": "store_true",
+        "help": "Use logging.INFO",
+    },
     "nproc_per_node": {
         "default": None,
         "type": int,
-        "help": "The number of processes to launch on each node, for GPU training this is recommended to be set to the number of GPUs in your system so that each process can be bound to a single GPU",
+        "help": """The number of processes to launch on each node, for GPU training
+                this is recommended to be set to the number of GPUs in your system
+                so that each process can be bound to a single GPU""",
     },
     "nnodes": {
         "default": None,
@@ -113,6 +136,3 @@ def get_default_parser():
         parser.add_argument(f"--{key}", **value)
 
     return parser
-
-
-get_default_parser()

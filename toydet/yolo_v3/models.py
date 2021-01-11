@@ -10,7 +10,7 @@ from ignite.utils import to_onehot
 from torch import Tensor, nn
 from torchvision.ops import box_convert
 
-from toydet.yolo_v3.utils import get_abs_yolo_bbox, box_iou_wh
+from toydet.yolo_v3.utils import box_iou_wh, get_abs_yolo_bbox
 
 __all__ = (
     "ANCHORS",
