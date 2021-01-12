@@ -100,8 +100,7 @@ DEFAULTS = {
         "help": "used in ignite.utils.manual_seed()",
     },
     "wandb": {
-        "default": False,
-        "type": bool,
+        "action": "store_true",
         "help": "to use wandb or not",
     },
     "verbose": {
