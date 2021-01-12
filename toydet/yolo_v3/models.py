@@ -261,8 +261,6 @@ class YOLOLayer(nn.Module):
         abs_bbox = get_abs_yolo_bbox(rel_bbox, self.anchors) / self.grid_size
         abs_conf = torch.sigmoid(rel_conf)
         abs_cls = torch.sigmoid(rel_cls)
-        logger.info("%s", abs_bbox)
-        logger.info("%s", abs_bbox.shape)
         return (
             torch.cat(
                 (
