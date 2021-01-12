@@ -56,7 +56,7 @@ def train_fn(
     optimizer.zero_grad()
 
     loss_dict["epoch"] = engine.state.epoch
-    return {k: v for k, v in sorted(loss_dict.items())}
+    return dict(sorted(loss_dict.items()))
 
 
 @torch.no_grad()
@@ -73,7 +73,7 @@ def evaluate_fn(
     preds = torch.cat(preds, dim=1)
     conf_mask = (preds[..., 4] > config.conf_threshold).unsqueeze(-1)
     preds = preds * conf_mask
-    preds[..., :4] = box_convert(preds[..., :4], "cxcywh", "xyxy")
+    preds[..., :4] = box_convert(preds[..., :4] * config.img_size, "cxcywh", "xyxy")
     pred_cls, _ = torch.max(preds[..., 5:], dim=-1, keepdim=True)
     preds = torch.cat((preds[..., :5], pred_cls), dim=-1)
     zero_mask = preds != 0
@@ -114,7 +114,7 @@ def main(local_rank: int, config: Namespace):
     # ---------------
     config.__dict__.update(**optimizer.defaults)
     logger, name = setup_logging(optimizer, config)
-    logger.info("Configs\n%s" % pformat(vars(config)))
+    logger.info("Configs\n%s", pformat(vars(config)))
     params_info(net)
     cuda_info(config.device)
 
@@ -154,7 +154,7 @@ def main(local_rank: int, config: Namespace):
     # eval engine run / overfit
     # ---------------------------
     if config.overfit_batches:
-        logger.info("Eval overfitting with %i." % config.overfit_batches)
+        logger.info("Eval overfitting with %i.", config.overfit_batches)
         engine_train.add_event_handler(
             Events.EPOCH_COMPLETED,
             lambda: engine_eval.run(
@@ -178,7 +178,7 @@ def main(local_rank: int, config: Namespace):
     # train engine run / overfit
     # ----------------------------
     if config.overfit_batches:
-        logger.info("Train overfitting with %i." % config.overfit_batches)
+        logger.info("Train overfitting with %i.", config.overfit_batches)
         engine_train.run(
             dataloader_train,
             max_epochs=config.max_epochs,
@@ -208,13 +208,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--conf_threshold", default=0.5, type=float, help="confidence threshold"
     )
-    config = parser.parse_args()
-    manual_seed(config.seed)
-    if config.filepath:
-        path = Path(config.filepath)
+    opt = parser.parse_args()
+    manual_seed(opt.seed)
+    if opt.filepath:
+        path = Path(opt.filepath)
         path.mkdir(parents=True, exist_ok=True)
-        config.filepath = path
+        opt.filepath = path
     with idist.Parallel(
-        idist.backend(), config.nproc_per_node, config.nnodes, config.node_rank
+        idist.backend(), opt.nproc_per_node, opt.nnodes, opt.node_rank
     ) as parallel:
-        parallel.run(main, config)
+        parallel.run(main, opt)

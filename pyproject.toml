@@ -25,15 +25,15 @@ exclude = '''
 )
 '''
 
-# ------------
+# -----------------
 # isort config
-# ------------
+# -----------------
 [tool.isort]
 profile="black"
 
-# -------------
+# -----------------
 # pylint config
-# -------------
+# -----------------
 [tool.pylint.reports]
 output-format="colorized"
 reports="yes"

@@ -1,3 +1,4 @@
+"""Common utils to use with ignite training / evaluation."""
 import logging
 import os
 from argparse import Namespace
@@ -9,13 +10,13 @@ from typing import Any, Iterable, Optional, Sequence, Tuple, Union
 import ignite.distributed as idist
 import numpy as np
 import torch
-from torch.nn import Module
 from ignite.contrib.handlers import WandBLogger
 from ignite.engine import Engine
 from ignite.utils import setup_logger
 from PIL import Image, ImageDraw, ImageFont
+from torch.nn import Module
 from torch.optim import Optimizer
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms.functional import to_pil_image
 
 logger = logging.getLogger()
@@ -30,9 +31,8 @@ def draw_bounding_boxes(
     labels: Optional[Sequence[str]] = None,
     colors: Optional[Tuple[int, int, int]] = None,
     width: int = 1,
-    font: Optional[str] = None,
-    font_size: int = 10,
 ) -> Image:
+    """Draws bounding boxes on given image."""
 
     if isinstance(image, torch.Tensor):
         image = to_pil_image(image, "RGB")
@@ -45,11 +45,7 @@ def draw_bounding_boxes(
         boxes = boxes.astype(np.int64).tolist()
 
     draw = ImageDraw.Draw(image)
-    font = (
-        ImageFont.load_default()
-        if font is None
-        else ImageFont.truetype(font=font, size=font_size)
-    )
+    font = ImageFont.load_default()
 
     if colors is None:
         colors = [
@@ -61,10 +57,12 @@ def draw_bounding_boxes(
         draw.rectangle(box, outline=color, width=width)
 
         if labels is not None:
-            xy = box[0] + 1, box[1]
+            x_y = box[0] + 1, box[1]
             text_width, text_height = font.getsize(labels[i])
-            draw.rectangle((xy, (xy[0] + text_width, xy[1] + text_height)), fill=color)
-            draw.text(xy, labels[i], fill="white", font=font)
+            draw.rectangle(
+                (x_y, (x_y[0] + text_width, x_y[1] + text_height)), fill=color
+            )
+            draw.text(x_y, labels[i], fill="white", font=font)
 
     return image
 
@@ -81,7 +79,7 @@ def cuda_info(device: torch.device) -> None:
             "CUDA_VISIBLE_DEVICES", ",".join([str(i) for i in range(devices)])
         )
         prop = torch.cuda.get_device_properties(device=device)
-        logger.info(f"CUDA_VISIBLE_DEVICES - {devices}\n\t{prop} - {device}")
+        logger.info("CUDA_VISIBLE_DEVICES - %s\n\t%s - %s", devices, prop, device)
 
 
 def mem_info(device: torch.device) -> None:
@@ -91,20 +89,19 @@ def mem_info(device: torch.device) -> None:
         device (torch.device): current torch.device.
     """
     if "cuda" in device.type:
-        MB = 1024.0 * 1024.0
+        mega_byte = 1024.0 * 1024.0
         memformat = """
-        Memory allocated {1} MB
-        Max Memory allocated {2} MB
-        Memory reserved {3} MB
-        Max Memory reserved {4} MB"""
+        Memory allocated %.6f MB
+        Max Memory allocated %.6f MB
+        Memory reserved %.6f MB
+        Max Memory reserved %.6f MB"""
 
         logger.info(
-            memformat.format(
-                torch.cuda.memory_allocated(device) / MB,
-                torch.cuda.max_memory_allocated(device) / MB,
-                torch.cuda.memory_reserved(device) / MB,
-                torch.cuda.max_memory_reserved(device) / MB,
-            ),
+            memformat,
+            torch.cuda.memory_allocated(device) / mega_byte,
+            torch.cuda.max_memory_allocated(device) / mega_byte,
+            torch.cuda.memory_reserved(device) / mega_byte,
+            torch.cuda.max_memory_reserved(device) / mega_byte,
         )
 
 
@@ -116,7 +113,7 @@ def params_info(net: Module) -> None:
     """
     params = sum(p.numel() for p in net.parameters())
     gradients = sum(p.numel() for p in net.parameters() if p.requires_grad)
-    logger.info("Parameters {:,} - Gradients {:,}".format(params, gradients))
+    logger.info("Parameters %g - Gradients %g", params, gradients)
 
 
 def sanity_check(engine: Engine, dataloader: Iterable, config: Namespace) -> None:
@@ -127,7 +124,7 @@ def sanity_check(engine: Engine, dataloader: Iterable, config: Namespace) -> Non
         dataloader (Iterable): ``data`` argument of ``engine.run()``.
         config (Namespace): config namespace object.
     """
-    logger.info("Sanity checking with %i iterations." % config.sanity_check)
+    logger.info("Sanity checking with %i iterations.", config.sanity_check)
     engine.run(dataloader, max_epochs=1, epoch_length=config.sanity_check)
     # set to None to use `epoch_length`
     engine.state.max_epochs = None
@@ -194,14 +191,14 @@ def setup_logging(optimizer: Optimizer, config: Namespace) -> Tuple[Logger, str]
         Tuple[Logger, str]: instance of ``Logger`` and name
     """
     name = f"bs{config.batch_size}-lr{config.lr}-{optimizer.__class__.__name__}"
-    now = datetime.now().strftime("%Y-%m-%d-%X")
-    logger = setup_logger(
+    now = datetime.now().strftime("%Y%m%d-%X")
+    logger_ = setup_logger(
         level=logging.INFO if config.verbose else logging.WARNING,
         format="%(levelname)s: %(message)s",
         filepath=config.filepath / f"{name}-{now}.log",
     )
 
-    return logger, name
+    return logger_, name
 
 
 def get_wandb_logger(

@@ -83,6 +83,7 @@ class VOCDetection_(VOCDetection):
 
     @staticmethod
     def collate_fn(batch):
+        """Collate image as usual and target with image number."""
         imgs, targets = zip(*batch)
         imgs = [to_tensor(img) for img in imgs]
         imgs = torch.stack(imgs, dim=0)
