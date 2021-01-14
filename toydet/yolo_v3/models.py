@@ -9,7 +9,14 @@ from ignite.distributed import device
 from torch import Tensor, nn
 from torchvision.ops import box_convert
 
-from toydet.yolo_v3.utils import box_iou_wh, get_abs_yolo_bbox
+
+def box_iou_wh(wh1, wh2):
+    wh2 = wh2.t()
+    w1, h1 = wh1[0], wh1[1]
+    w2, h2 = wh2[0], wh2[1]
+    inter_area = torch.min(w1, w2) * torch.min(h1, h2)
+    union_area = (w1 * h1 + 1e-16) + w2 * h2 - inter_area
+    return inter_area / union_area
 
 
 def _make_residual_layers(out_channels, times) -> nn.Sequential:
@@ -200,8 +207,8 @@ class YOLOLayer(nn.Module):
             target (Tensor, optional)
 
         Returns:
-            Tensor: pred_bbox, pred_cls, pred_conf in train mode
-            Tensor: pred_bbox * stride, sigmoid(pred_cls), sigmoid(pred_conf) if eval
+            Tensor: pred [N, A, G, G, C + 5] if train
+            Tensor: pred [N, -1, C + 5] if eval, sigmoid cls and conf
         """
         if inputs.size(2) != inputs.size(3):
             raise ValueError("image must have same height and width.")
@@ -234,35 +241,41 @@ class YOLOLayer(nn.Module):
             self.anchors = self.anchors * self.grid_size
 
         if self.training:
+            return pred
             # target: [number of objects in a batch, 6]
             # target is also normalized by img_size, so its [0-1]
             # multiplied with grid_size for grid_size x grid_size output
-            target = torch.cat(
-                (target[..., :2], target[..., 2:] * self.grid_size), dim=-1
-            )
-            return self.train_process(pred, target)
+            # target = torch.cat(
+            #     (target[..., :2], target[..., 2:] * self.grid_size), dim=-1
+            # )
 
-        rel_bbox, rel_conf, rel_cls = torch.split(
-            pred, (4, 1, self.num_classes), dim=-1
-        )
+        x_y, w_h, conf, cls_ = torch.split(pred, (2, 2, 1, self.num_classes), dim=-1)
+        aranged_tensor = torch.arange(grid_size, device=pred.device)
+        # reverse the output of meshgrid to make since
+        # x is same value in x-axis
+        # y is same value in y-axis
+        # we want reverse of that
+        grid_xy = torch.stack(
+            torch.meshgrid(aranged_tensor, aranged_tensor)[::-1], dim=-1
+        ).reshape(1, 1, grid_size, grid_size, 2)
+
         # divide by grid_size so they are in [0-1]
         # and later we can multiply with img_size for img_size x img_size output
-        abs_bbox = get_abs_yolo_bbox(rel_bbox, self.anchors) / self.grid_size
-        abs_conf = torch.sigmoid(rel_conf)
-        abs_cls = torch.sigmoid(rel_cls)
-        return (
-            torch.cat(
-                (
-                    abs_bbox.reshape(batch_size, -1, 4),
-                    abs_conf.reshape(batch_size, -1, 1),
-                    abs_cls.reshape(batch_size, -1, self.num_classes),
-                ),
-                dim=-1,
+        x_y = torch.add(x_y, grid_xy) / self.grid_size
+        w_h = torch.exp(w_h) * self.anchors.reshape(1, 3, 1, 1, 2) / self.grid_size
+        conf = torch.sigmoid(conf)
+        cls_ = torch.sigmoid(cls_)
+        return torch.cat(
+            (
+                x_y.reshape(batch_size, -1, 2),
+                w_h.reshape(batch_size, -1, 2),
+                conf.reshape(batch_size, -1, 1),
+                cls_.reshape(batch_size, -1, self.num_classes),
             ),
-            0,
+            dim=-1,
         )
 
-    def train_process(
+    def train_loss(
         self,
         pred: Tensor,
         target: Tensor,
@@ -301,9 +314,20 @@ class YOLOLayer(nn.Module):
         target_noobj = torch.zeros_like(pred_noobj)
         pred_conf = torch.cat((pred_obj, pred_noobj), dim=0)
         target_conf = torch.cat((target_obj, target_noobj), dim=0)
-        pred = [pred_bbox, pred_conf, pred_cls[batch, iou_idx, height, width, :]]
-        target = [target_bbox, target_conf, target_cls]
-        return pred, target
+        loss_xywh = self.mse_loss(pred_bbox, target_bbox)
+        loss_conf = self.bce_with_logits_loss(pred_conf, target_conf)
+        loss_cls = self.bce_with_logits_loss(
+            pred_cls[batch, iou_idx, height, width, :], target_cls
+        )
+        loss = loss_xywh + loss_conf + loss_cls
+        return (
+            loss,
+            {
+                "bbox": loss_xywh.detach().cpu().item(),
+                "conf": loss_conf.detach().cpu().item(),
+                "cls": loss_cls.detach().cpu().item(),
+            },
+        )
 
 
 class Detector(nn.Module):
@@ -363,12 +387,7 @@ class Detector(nn.Module):
         Returns:
             Tuple[Tensor]: out1, out2, out3
         """
-        if self.training:
-            result_pred = {"bbox": [], "conf": [], "cls": []}
-            result_target = {"bbox": [], "conf": [], "cls": []}
-        else:
-            result_pred = []
-            result_target = []
+        result = []
         output = inputs[-1]
         idx = 1
         for name, module in self.module_dict.items():
@@ -376,16 +395,7 @@ class Detector(nn.Module):
                 output = module(output)
                 tip = output
             elif "yolo_layer" in name:
-                yolo_pred, yolo_target = module(output, target)
-                if self.training:
-                    result_pred["bbox"].append(yolo_pred[0])
-                    result_pred["conf"].append(yolo_pred[1])
-                    result_pred["cls"].append(yolo_pred[2])
-                    result_target["bbox"].append(yolo_target[0])
-                    result_target["conf"].append(yolo_target[1])
-                    result_target["cls"].append(yolo_target[2])
-                else:
-                    result_pred.append(yolo_pred)
+                result.append(module(output, target))
             elif "conv_block" in name:
                 output = module(tip)
             elif "upsample" in name:
@@ -395,7 +405,7 @@ class Detector(nn.Module):
             else:
                 output = module(output)
         del tip
-        return result_pred, result_target
+        return result
 
 
 class YOLOv3(nn.Module):
@@ -412,13 +422,10 @@ class YOLOv3(nn.Module):
 
     def __init__(self, img_size: int, num_classes: int) -> None:
         super().__init__()
-        self.img_size = img_size
         self.extractor = Extractor()
         self.detector = Detector(img_size, num_classes)
-        self.mse_loss = nn.MSELoss()
-        self.bce_with_logits_loss = nn.BCEWithLogitsLoss()
 
-    def forward(self, inputs: Tensor, target: Tensor = None) -> Tensor:
+    def forward(self, inputs: Tensor) -> Tensor:
         """
         YOLOv3 forward function.
 
@@ -428,38 +435,29 @@ class YOLOv3(nn.Module):
         Returns:
             Tuple[Tensor]: out1, out2, out3
         """
-        results = self.extractor(inputs)
-        if self.training:
-            target = torch.cat(
-                (
-                    target[:, :2],
-                    box_convert(target[:, 2:], "xyxy", "cxcywh") / self.img_size,
-                ),
-                dim=-1,
-            )
-        result_pred, result_target = self.detector(results, target)
-        if self.training:
-            result_pred["bbox"] = torch.cat(result_pred["bbox"], dim=0)
-            result_pred["conf"] = torch.cat(result_pred["conf"], dim=0)
-            result_pred["cls"] = torch.cat(result_pred["cls"], dim=0)
-            result_target["bbox"] = torch.cat(result_target["bbox"], dim=0)
-            result_target["conf"] = torch.cat(result_target["conf"], dim=0)
-            result_target["cls"] = torch.cat(result_target["cls"], dim=0)
+        return self.detector(self.extractor(inputs))
+        # if self.training:
+        #     result_pred["bbox"] = torch.cat(result_pred["bbox"], dim=0)
+        #     result_pred["conf"] = torch.cat(result_pred["conf"], dim=0)
+        #     result_pred["cls"] = torch.cat(result_pred["cls"], dim=0)
+        #     result_target["bbox"] = torch.cat(result_target["bbox"], dim=0)
+        #     result_target["conf"] = torch.cat(result_target["conf"], dim=0)
+        #     result_target["cls"] = torch.cat(result_target["cls"], dim=0)
 
-            loss_xywh = self.mse_loss(result_pred["bbox"], result_target["bbox"])
-            loss_conf = self.bce_with_logits_loss(
-                result_pred["conf"], result_target["conf"]
-            )
-            loss_cls = self.bce_with_logits_loss(
-                result_pred["cls"], result_target["cls"]
-            )
-            total_loss = loss_xywh + loss_cls + loss_conf
-            loss_dict = {
-                "loss/xywh": loss_xywh.detach().cpu().item(),
-                "loss/cls": loss_cls.detach().cpu().item(),
-                "loss/conf": loss_conf.detach().cpu().item(),
-                "loss/total": total_loss.detach().cpu().item(),
-            }
-            return loss_dict, total_loss
+        #     loss_xywh = self.mse_loss(result_pred["bbox"], result_target["bbox"])
+        #     loss_conf = self.bce_with_logits_loss(
+        #         result_pred["conf"], result_target["conf"]
+        #     )
+        #     loss_cls = self.bce_with_logits_loss(
+        #         result_pred["cls"], result_target["cls"]
+        #     )
+        #     total_loss = loss_xywh + loss_cls + loss_conf
+        #     loss_dict = {
+        #         "loss/xywh": loss_xywh.detach().cpu().item(),
+        #         "loss/cls": loss_cls.detach().cpu().item(),
+        #         "loss/conf": loss_conf.detach().cpu().item(),
+        #         "loss/total": total_loss.detach().cpu().item(),
+        #     }
+        #     return loss_dict, total_loss
 
-        return result_pred
+        # return result_pred

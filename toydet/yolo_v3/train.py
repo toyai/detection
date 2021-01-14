@@ -28,6 +28,7 @@ from toydet.utils import (
 )
 from toydet.datasets import VOCDetection_
 from toydet.yolo_v3.models import YOLOv3
+from toydet.yolo_v3.utils import box_iou_wh
 
 torch.autograd.set_detect_anomaly(True)
 
@@ -41,6 +42,72 @@ transforms_train = SequentialWithDict(
 transforms_eval = SequentialWithDict({"LetterBox": LetterBox(416)})
 
 
+class YOLOLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mse_loss = nn.MSELoss()
+        self.bce_with_logits_loss = nn.BCEWithLogitsLoss()
+        self.loss_dict = {
+            "loss/xywh": 0,
+            "loss/conf": 0,
+            "loss/cls": 0,
+            "loss/total": 0,
+        }
+
+    def forward(self, pred, target, anchors, num_classes):
+        pred, target = self.make_pred_and_target(pred, target, anchors, num_classes)
+        loss_xywh = self.mse_loss(pred[0], target[0])
+        loss_conf = self.bce_with_logits_loss(pred[1], target[1])
+        loss_cls = self.bce_with_logits_loss(pred[2], target[2])
+        losses = loss_xywh + loss_conf + loss_cls
+        self.loss_dict["loss/xywh"] += loss_xywh.detach().cpu().item()
+        self.loss_dict["loss/conf"] += loss_conf.detach().cpu().item()
+        self.loss_dict["loss/cls"] += loss_cls.detach().cpu().item()
+        self.loss_dict["loss/total"] += losses.detach().cpu().item()
+        return losses
+
+    def make_pred_and_target(self, pred, target, anchors, num_classes):
+        # target: [number of objects in a batch, 6]
+        # target is also normalized by img_size, so its [0-1]
+        # multiplied with grid_size for grid_size x grid_size output
+        target = torch.cat((target[..., :2], target[..., 2:] * pred.size(2)), dim=-1)
+        pred_bbox, pred_conf, pred_cls = torch.split(pred, (4, 1, num_classes), dim=-1)
+        batch, labels, target_xy, target_wh = torch.split(target, (1, 1, 2, 2), dim=-1)
+        batch, labels = batch.long().squeeze(-1), labels.long().squeeze(-1)
+        width, height = target_wh[..., 0].long(), target_wh[..., 1].long()
+
+        ious = torch.stack([box_iou_wh(anchor, target_wh) for anchor in anchors], dim=0)
+        _, iou_idx = torch.max(ious, 0)
+
+        target_xy = target_xy - torch.floor(target_xy)
+        target_wh = torch.log(target_wh / anchors[iou_idx])
+        pred_bbox = pred_bbox[batch, iou_idx, height, width, :]
+        target_bbox = torch.cat((target_xy, target_wh), dim=-1)
+        if not pred_bbox.shape == target_bbox.shape:
+            raise AssertionError(
+                f"Got pred_bbox {pred_bbox.shape}, target_bbox {target_bbox.shape}"
+            )
+        target_cls = nn.functional.one_hot(labels, num_classes).type_as(pred_cls)
+
+        obj_mask = torch.zeros_like(pred_conf, dtype=torch.bool)
+        obj_mask[batch, iou_idx, height, width, :] = 1
+        noobj_mask = 1 - obj_mask.float()
+        for i, iou in enumerate(ious.t()):
+            noobj_mask[batch[i], iou > 0.5, height[i], width[i], :] = 0
+
+        pred_obj = torch.masked_select(pred_conf, obj_mask)
+        pred_noobj = torch.masked_select(pred_conf, noobj_mask.to(torch.bool))
+        target_obj = torch.ones_like(pred_obj)
+        target_noobj = torch.zeros_like(pred_noobj)
+        pred_conf = torch.cat((pred_obj, pred_noobj), dim=0)
+        target_conf = torch.cat((target_obj, target_noobj), dim=0)
+        return (pred_bbox, pred_conf, pred_cls[batch, iou_idx, height, width, :]), (
+            target_bbox,
+            target_conf,
+            target_cls,
+        )
+
+
 def train_fn(
     engine: Engine,
     batch: Sequence[Tensor],
@@ -51,14 +118,36 @@ def train_fn(
     net.train(True)
     img = batch[0].to(config.device, non_blocking=True)
     target = batch[1].to(config.device, non_blocking=True)
-    loss_dict, total_loss = net(img, target)
+    # make target normalized by img_size, so its [0-1]
+    target[..., 2:] = box_convert(target[..., 2:], "xyxy", "cxcywh") / config.img_size
+    results = net(img)
+    yolo_loss = YOLOLoss()
+    losses = 0
+    losses += yolo_loss(
+        results[0],
+        target,
+        net.detector.module_dict.yolo_layer_0.anchors,
+        config.num_classes,
+    )
+    losses += yolo_loss(
+        results[1],
+        target,
+        net.detector.module_dict.yolo_layer_1.anchors,
+        config.num_classes,
+    )
+    losses += yolo_loss(
+        results[2],
+        target,
+        net.detector.module_dict.yolo_layer_2.anchors,
+        config.num_classes,
+    )
 
-    total_loss.backward()
+    losses.backward()
     optimizer.step()
     optimizer.zero_grad()
 
-    loss_dict["epoch"] = engine.state.epoch
-    return dict(sorted(loss_dict.items()))
+    yolo_loss.loss_dict["epoch"] = engine.state.epoch
+    return dict(sorted(yolo_loss.loss_dict.items()))
 
 
 @torch.no_grad()
@@ -121,9 +210,9 @@ def main(local_rank: int, config: Namespace):
     # datasets and dataloaders
     # --------------------------
     dataset_eval = VOCDetection_(
-        config.dataset_path, image_set="val", transforms=transforms_eval
+        config.data_path, image_set="val", transforms=transforms_eval
     )
-    dataset_train = VOCDetection_(config.dataset_path, transforms=transforms_train)
+    dataset_train = VOCDetection_(config.data_path, transforms=transforms_train)
     dataloader_train, dataloader_eval = get_dataloaders(
         dataset_train, dataset_eval, config
     )
