@@ -1,46 +1,27 @@
 """YOLO v3 Models."""
 
-import logging
 from collections import OrderedDict
 from typing import Callable, Dict, List, Optional, Tuple
 
 import torch
+from torch.nn import functional as F
 from ignite.distributed import device
-from ignite.utils import to_onehot
 from torch import Tensor, nn
 from torchvision.ops import box_convert
 
 from toydet.yolo_v3.utils import box_iou_wh, get_abs_yolo_bbox
 
-__all__ = (
-    "ANCHORS",
-    "ConvBN",
-    "ResidualBlock",
-    "YOLOLayer",
-    "YOLOv3",
-)
 
-logger = logging.getLogger(__name__)
-
-
-ANCHORS = (
-    ((10, 13), (16, 30), (33, 23)),
-    ((30, 61), (62, 45), (59, 119)),
-    ((116, 90), (156, 198), (373, 326)),
-)
-
-
-def _make_residual_layers(in_channels, out_channels, times):
+def _make_residual_layers(out_channels, times) -> nn.Sequential:
     """
-    Make residual block `times` times.
+    Make residual block ``times`` times.
 
     Args:
-        in_channels (int)
         out_channels (int)
         times (int)
 
     Returns:
-        module_list (nn.Sequential)
+        Sequential: module_list
     """
     module_list = []
     for _ in range(times):
@@ -49,7 +30,19 @@ def _make_residual_layers(in_channels, out_channels, times):
     return nn.Sequential(*module_list)
 
 
-def six_convbn(in_channels, out_channels, anchors, num_classes, idx):
+def six_convbn(in_channels, out_channels, anchors, num_classes, idx) -> OrderedDict:
+    """6 ConvBN + 1 Conv2d + 1 YOLOLayer.
+
+    Args:
+        in_channels (int)
+        out_channels (int)
+        anchors (list)
+        num_classes (int)
+        idx (int)
+
+    Returns:
+        OrderedDict: module_dict
+    """
     if out_channels % 2 != 0:
         raise ValueError("out_channels must be divisible by 2.")
     half_channels = out_channels // 2
@@ -77,7 +70,7 @@ class ConvBN(nn.Module):
         in_channels (int)
         out_channels (int)
         kernel_size (int)
-        norm_layer (Callable): Default BatchNorm2d.
+        norm_layer (Callable): Default BatchNorm2d
         activation_layer (Callable): Default LeakyReLU
         **conv_kwargs
     """
@@ -136,8 +129,7 @@ class ResidualBlock(nn.Module):
         Args:
             inputs (Tensor)
         """
-        shortcut = inputs
-        return self.convbn2(self.convbn1(inputs)) + shortcut
+        return self.convbn2(self.convbn1(inputs)) + inputs
 
 
 class Extractor(nn.Module):
@@ -158,7 +150,7 @@ class Extractor(nn.Module):
                 bb, bbs[i + 1], kernel_size=3, stride=2
             )
             self.module_dict[f"res_block_{i + 1}"] = _make_residual_layers(
-                bb, bbs[i + 1], time
+                bbs[i + 1], time
             )
 
     def forward(self, inputs: Tensor) -> List[Tensor]:
@@ -186,11 +178,10 @@ class YOLOLayer(nn.Module):
 
     Args:
         anchors (Tensor)
-        img_size (int)
         num_classes (int)
 
     Returns:
-        prediction (Tensor) [B, A, H, W, C + 5]
+        Tensor: prediction [B, A, H, W, C + 5]
     """
 
     def __init__(self, anchors: Tensor, num_classes: int) -> None:
@@ -200,12 +191,13 @@ class YOLOLayer(nn.Module):
         self.num_classes = num_classes
         self.grid_size = 0
 
-    def forward(self, inputs: Tensor, target: Tensor = None) -> Tensor:
+    def forward(self, inputs: Tensor, target: Tensor = None) -> Tuple[Tensor, Tensor]:
         """
         YOLOLayer forward function.
 
         Args:
             inputs (Tensor)
+            target (Tensor, optional)
 
         Returns:
             Tensor: pred_bbox, pred_cls, pred_conf in train mode
@@ -240,9 +232,6 @@ class YOLOLayer(nn.Module):
             # anchors are already divided by image size, so its [0-1]
             # multiply by grid_size for grid_size x grid_size output
             self.anchors = self.anchors * self.grid_size
-            logger.info(
-                "Multiplied normalized anchors with grid size %i ...", grid_size
-            )
 
         if self.training:
             # target: [number of objects in a batch, 6]
@@ -251,7 +240,7 @@ class YOLOLayer(nn.Module):
             target = torch.cat(
                 (target[..., :2], target[..., 2:] * self.grid_size), dim=-1
             )
-            return self.get_pred_and_target(pred, target)
+            return self.train_process(pred, target)
 
         rel_bbox, rel_conf, rel_cls = torch.split(
             pred, (4, 1, self.num_classes), dim=-1
@@ -273,18 +262,17 @@ class YOLOLayer(nn.Module):
             0,
         )
 
-    def get_pred_and_target(
+    def train_process(
         self,
         pred: Tensor,
         target: Tensor,
-        iou_ignore_threshold: float = 0.5,
     ):
         pred_bbox, pred_conf, pred_cls = torch.split(
             pred, (4, 1, self.num_classes), dim=-1
         )
         batch, labels, target_xy, target_wh = torch.split(target, (1, 1, 2, 2), dim=-1)
         batch, labels = batch.long().squeeze(-1), labels.long().squeeze(-1)
-        width, height = target_xy.long().t()
+        width, height = target_wh[..., 0].long(), target_wh[..., 1].long()
 
         ious = torch.stack(
             [box_iou_wh(anchor, target_wh) for anchor in self.anchors], dim=0
@@ -292,34 +280,29 @@ class YOLOLayer(nn.Module):
         _, iou_idx = torch.max(ious, 0)
 
         target_xy = target_xy - torch.floor(target_xy)
-        target_wh = torch.log(target[..., 4:] / (self.anchors[iou_idx] + 1e-16))
+        target_wh = torch.log(target_wh / self.anchors[iou_idx])
         pred_bbox = pred_bbox[batch, iou_idx, height, width, :]
         target_bbox = torch.cat((target_xy, target_wh), dim=-1)
         if not pred_bbox.shape == target_bbox.shape:
             raise AssertionError(
                 f"Got pred_bbox {pred_bbox.shape}, target_bbox {target_bbox.shape}"
             )
-        target_cls = to_onehot(labels, self.num_classes).type_as(pred_cls)
+        target_cls = F.one_hot(labels, self.num_classes).type_as(pred_cls)
 
         obj_mask = torch.zeros_like(pred_conf, dtype=torch.bool)
         obj_mask[batch, iou_idx, height, width, :] = 1
         noobj_mask = 1 - obj_mask.float()
         for i, iou in enumerate(ious.t()):
-            noobj_mask[batch[i], iou > iou_ignore_threshold, height[i], width[i], :] = 0
+            noobj_mask[batch[i], iou > 0.5, height[i], width[i], :] = 0
 
         pred_obj = torch.masked_select(pred_conf, obj_mask)
-        pred_noobj = torch.masked_select(pred_conf, noobj_mask.bool())
+        pred_noobj = torch.masked_select(pred_conf, noobj_mask.to(torch.bool))
         target_obj = torch.ones_like(pred_obj)
         target_noobj = torch.zeros_like(pred_noobj)
         pred_conf = torch.cat((pred_obj, pred_noobj), dim=0)
         target_conf = torch.cat((target_obj, target_noobj), dim=0)
-
-        pred = {
-            "bbox": pred_bbox,
-            "conf": pred_conf,
-            "cls": pred_cls[batch, iou_idx, height, width, :],
-        }
-        target = {"bbox": target_bbox, "conf": target_conf, "cls": target_cls}
+        pred = [pred_bbox, pred_conf, pred_cls[batch, iou_idx, height, width, :]]
+        target = [target_bbox, target_conf, target_cls]
         return pred, target
 
 
@@ -335,7 +318,7 @@ class Detector(nn.Module):
         out1, out2, out3 (Tuple[Tensor])
     """
 
-    def __init__(self, num_classes: int) -> None:
+    def __init__(self, img_size: int, num_classes: int) -> None:
         super().__init__()
         # pylint: disable=not-callable
         anchors = (
@@ -347,7 +330,7 @@ class Detector(nn.Module):
                 ],
                 device=device(),
             )
-            / 416.0
+            / float(img_size)
         )
         self.module_dict = nn.ModuleDict()
         channels = ((1024, 1024), (768, 512), (384, 256))
@@ -380,8 +363,12 @@ class Detector(nn.Module):
         Returns:
             Tuple[Tensor]: out1, out2, out3
         """
-        result_pred = {"bbox": [], "conf": [], "cls": []} if self.training else []
-        result_target = {"bbox": [], "conf": [], "cls": []} if self.training else []
+        if self.training:
+            result_pred = {"bbox": [], "conf": [], "cls": []}
+            result_target = {"bbox": [], "conf": [], "cls": []}
+        else:
+            result_pred = []
+            result_target = []
         output = inputs[-1]
         idx = 1
         for name, module in self.module_dict.items():
@@ -391,15 +378,14 @@ class Detector(nn.Module):
             elif "yolo_layer" in name:
                 yolo_pred, yolo_target = module(output, target)
                 if self.training:
-                    result_pred["bbox"].append(yolo_pred["bbox"])
-                    result_pred["conf"].append(yolo_pred["conf"])
-                    result_pred["cls"].append(yolo_pred["cls"])
-                    result_target["bbox"].append(yolo_target["bbox"])
-                    result_target["conf"].append(yolo_target["conf"])
-                    result_target["cls"].append(yolo_target["cls"])
+                    result_pred["bbox"].append(yolo_pred[0])
+                    result_pred["conf"].append(yolo_pred[1])
+                    result_pred["cls"].append(yolo_pred[2])
+                    result_target["bbox"].append(yolo_target[0])
+                    result_target["conf"].append(yolo_target[1])
+                    result_target["cls"].append(yolo_target[2])
                 else:
                     result_pred.append(yolo_pred)
-                    # result_target.append(yolo_target)
             elif "conv_block" in name:
                 output = module(tip)
             elif "upsample" in name:
@@ -428,7 +414,7 @@ class YOLOv3(nn.Module):
         super().__init__()
         self.img_size = img_size
         self.extractor = Extractor()
-        self.detector = Detector(num_classes)
+        self.detector = Detector(img_size, num_classes)
         self.mse_loss = nn.MSELoss()
         self.bce_with_logits_loss = nn.BCEWithLogitsLoss()
 

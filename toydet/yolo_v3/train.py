@@ -8,7 +8,7 @@ import torch
 from ignite.engine import Engine, Events
 from ignite.utils import manual_seed
 from torch import Tensor, nn, optim
-from torchvision.ops import box_convert
+from torchvision.ops import box_convert, nms
 
 from toydet import get_default_parser
 from toydet.transforms import (
@@ -26,8 +26,10 @@ from toydet.utils import (
     sanity_check,
     setup_logging,
 )
-from toydet.yolo_v3.datasets import VOCDetection_
+from toydet.datasets import VOCDetection_
 from toydet.yolo_v3.models import YOLOv3
+
+torch.autograd.set_detect_anomaly(True)
 
 transforms_train = SequentialWithDict(
     {
@@ -71,12 +73,44 @@ def evaluate_fn(
     target = batch[1].to(config.device, non_blocking=True)
     preds = net(img)
     preds = torch.cat(preds, dim=1)
-    conf_mask = (preds[..., 4] > config.conf_threshold).unsqueeze(-1)
+    conf_mask = preds[..., 4:5] >= config.conf_threshold
     preds = preds * conf_mask
     preds[..., :4] = box_convert(preds[..., :4] * config.img_size, "cxcywh", "xyxy")
-    pred_cls, _ = torch.max(preds[..., 5:], dim=-1, keepdim=True)
-    preds = torch.cat((preds[..., :5], pred_cls), dim=-1)
-    zero_mask = preds != 0
+    raw_score = preds[..., 4:5] * preds[..., 5:]
+    raw_bbox = preds[..., :4]
+    bbox = []
+    label = []
+    score = []
+    for l in range(config.num_classes):
+        bbox_l = raw_bbox
+        score_l = raw_score[..., l]
+        mask = score_l >= config.conf_threshold
+        bbox_l = bbox_l[mask]
+        score_l = score_l[mask]
+        keep = nms(bbox_l, score_l, 0.7)
+        bbox_l = bbox_l[keep]
+        score_l = score_l[keep]
+
+        if len(bbox_l):
+            bbox.append(bbox_l)
+            label.append(torch.tensor((l,) * len(bbox_l)))
+        if len(score_l):
+            score.append(score_l)
+
+    if len(bbox) and len(label) and len(score):
+        bbox = torch.vstack(bbox)
+        label = torch.hstack(label)
+        score = torch.hstack(score)
+
+        max_score, idx = torch.max(score, dim=0)
+        label = label[idx]
+        bbox = bbox[idx]
+        # img = draw_bounding_boxes()
+        print(max_score, idx, label, bbox)
+
+    # pred_cls, _ = torch.max(preds[..., 5:], dim=-1, keepdim=True)
+    # preds = torch.cat((preds[..., :5], pred_cls), dim=-1)
+    # zero_mask = preds != 0
     return preds, target
 
 
@@ -203,10 +237,12 @@ if __name__ == "__main__":
     parser = ArgumentParser(
         "YOLOv3 training and evaluation script", parents=[get_default_parser()]
     )
-    parser.add_argument("--img_size", default=416, type=int, help="image size")
-    parser.add_argument("--num_classes", default=20, type=int, help="number of classes")
+    parser.add_argument("--img_size", default=416, type=int, help="image size (416)")
     parser.add_argument(
-        "--conf_threshold", default=0.5, type=float, help="confidence threshold"
+        "--num_classes", default=20, type=int, help="number of classes (20)"
+    )
+    parser.add_argument(
+        "--conf_threshold", default=0.5, type=float, help="confidence threshold (0.5)"
     )
     opt = parser.parse_args()
     manual_seed(opt.seed)

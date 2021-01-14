@@ -12,7 +12,7 @@ from torchvision.transforms.functional import to_tensor
 # ----
 # VOC
 # ----
-CLASSES = [
+VOC_CLASSES = [
     "aeroplane",
     "bicycle",
     "bird",
@@ -51,7 +51,7 @@ class VOCDetection_(VOCDetection):
 
     def __init__(
         self,
-        root: str = "./datasets",
+        root: str = ".",
         year: str = "2012",
         image_set: str = "train",
         download: bool = False,
@@ -68,7 +68,7 @@ class VOCDetection_(VOCDetection):
         for obj in root_.iter("object"):
             target = [0]
             bbox = obj.find("bndbox")
-            target.append(CLASSES.index(obj.find("name").text))
+            target.append(VOC_CLASSES.index(obj.find("name").text))
             for xyxy in ("xmin", "ymin", "xmax", "ymax"):
                 target.append(int(bbox.find(xyxy).text))
             targets.append(target)
