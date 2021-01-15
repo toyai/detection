@@ -586,7 +586,8 @@ class YOLOLayer(nn.Module):
                 torch.meshgrid(aranged_tensor, aranged_tensor)[::-1], dim=-1
             ).reshape(1, 1, grid_size, grid_size, 2)
             self.anchors = torch.tensor(
-                [(w / self.stride, h / self.stride) for w, h in self.anchors]
+                [(w / self.stride, h / self.stride) for w, h in self.anchors],
+                device=pred.device,
             )
             del aranged_tensor
 
