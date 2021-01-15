@@ -56,9 +56,9 @@ class YOLOLoss(nn.Module):
 
     def forward(self, pred, target, anchors, num_classes):
         pred, target = self.make_pred_and_target(pred, target, anchors, num_classes)
-        loss_xywh = self.mse_loss(pred[0], target[0])
-        loss_conf = self.bce_with_logits_loss(pred[1], target[1])
-        loss_cls = self.bce_with_logits_loss(pred[2], target[2])
+        loss_xywh = self.mse_loss(pred[0], target[0]) / 3
+        loss_conf = self.bce_with_logits_loss(pred[1], target[1]) / 3
+        loss_cls = self.bce_with_logits_loss(pred[2], target[2]) / 3
         losses = loss_xywh + loss_conf + loss_cls
         self.loss_dict["loss/xywh"] += loss_xywh.detach().cpu().item()
         self.loss_dict["loss/conf"] += loss_conf.detach().cpu().item()
@@ -162,45 +162,48 @@ def evaluate_fn(
     target = batch[1].to(config.device, non_blocking=True)
     preds = net(img)
     preds = torch.cat(preds, dim=1)
-    conf_mask = preds[..., 4:5] >= config.conf_threshold
-    preds = preds * conf_mask
-    preds[..., :4] = box_convert(preds[..., :4] * config.img_size, "cxcywh", "xyxy")
-    raw_score = preds[..., 4:5] * preds[..., 5:]
-    raw_bbox = preds[..., :4]
-    bbox = []
-    label = []
-    score = []
-    for l in range(config.num_classes):
-        bbox_l = raw_bbox
-        score_l = raw_score[..., l]
-        mask = score_l >= config.conf_threshold
-        bbox_l = bbox_l[mask]
-        score_l = score_l[mask]
-        keep = nms(bbox_l, score_l, 0.7)
-        bbox_l = bbox_l[keep]
-        score_l = score_l[keep]
+    print("Preds is finite - ", torch.isfinite(preds).all())
+    print("Preds is nan - ", torch.isnan(preds).any())
+    print("Preds is inf - ", torch.isinf(preds).any())
+    # conf_mask = preds[..., 4:5] >= config.conf_threshold
+    # preds = preds * conf_mask
+    # preds[..., :4] = box_convert(preds[..., :4] * config.img_size, "cxcywh", "xyxy")
+    # raw_score = preds[..., 4:5] * preds[..., 5:]
+    # raw_bbox = preds[..., :4]
+    # bbox = []
+    # label = []
+    # score = []
+    # for l in range(config.num_classes):
+    #     bbox_l = raw_bbox
+    #     score_l = raw_score[..., l]
+    #     mask = score_l >= config.conf_threshold
+    #     bbox_l = bbox_l[mask]
+    #     score_l = score_l[mask]
+    #     keep = nms(bbox_l, score_l, 0.7)
+    #     bbox_l = bbox_l[keep]
+    #     score_l = score_l[keep]
 
-        if len(bbox_l):
-            bbox.append(bbox_l)
-            label.append(torch.tensor((l,) * len(bbox_l)))
-        if len(score_l):
-            score.append(score_l)
+    #     if len(bbox_l):
+    #         bbox.append(bbox_l)
+    #         label.append(torch.tensor((l,) * len(bbox_l)))
+    #     if len(score_l):
+    #         score.append(score_l)
 
-    if len(bbox) and len(label) and len(score):
-        bbox = torch.vstack(bbox)
-        label = torch.hstack(label)
-        score = torch.hstack(score)
+    # if len(bbox) and len(label) and len(score):
+    #     bbox = torch.vstack(bbox)
+    #     label = torch.hstack(label)
+    #     score = torch.hstack(score)
 
-        max_score, idx = torch.max(score, dim=0)
-        label = label[idx]
-        bbox = bbox[idx]
-        # img = draw_bounding_boxes()
-        print(max_score, idx, label, bbox)
+    #     max_score, idx = torch.max(score, dim=0)
+    #     label = label[idx]
+    #     bbox = bbox[idx]
+    #     # img = draw_bounding_boxes()
+    #     print(max_score, idx, label, bbox)
 
     # pred_cls, _ = torch.max(preds[..., 5:], dim=-1, keepdim=True)
     # preds = torch.cat((preds[..., :5], pred_cls), dim=-1)
     # zero_mask = preds != 0
-    return preds, target
+    return preds
 
 
 def main(local_rank: int, config: Namespace):
