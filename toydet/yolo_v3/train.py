@@ -6,6 +6,7 @@ from typing import Sequence
 import ignite.distributed as idist
 import torch
 from ignite.engine import Engine, Events
+from ignite.handlers import TerminateOnNan
 from ignite.utils import manual_seed
 from torch import Tensor, nn, optim
 from torchvision.ops import box_convert, nms
@@ -56,9 +57,9 @@ class YOLOLoss(nn.Module):
 
     def forward(self, pred, target, anchors, num_classes):
         pred, target = self.make_pred_and_target(pred, target, anchors, num_classes)
-        loss_xywh = self.mse_loss(pred[0], target[0]) / 3
-        loss_conf = self.bce_with_logits_loss(pred[1], target[1]) / 3
-        loss_cls = self.bce_with_logits_loss(pred[2], target[2]) / 3
+        loss_xywh = self.mse_loss(pred[0], target[0])
+        loss_conf = self.bce_with_logits_loss(pred[1], target[1])
+        loss_cls = self.bce_with_logits_loss(pred[2], target[2])
         losses = loss_xywh + loss_conf + loss_cls
         self.loss_dict["loss/xywh"] += loss_xywh.detach().cpu().item()
         self.loss_dict["loss/conf"] += loss_conf.detach().cpu().item()
@@ -120,34 +121,34 @@ def train_fn(
     target = batch[1].to(config.device, non_blocking=True)
     # make target normalized by img_size, so its [0-1]
     target[..., 2:] = box_convert(target[..., 2:], "xyxy", "cxcywh") / config.img_size
-    results = net(img)
-    yolo_loss = YOLOLoss()
-    losses = 0
-    losses += yolo_loss(
-        results[0],
-        target,
-        net.detector.module_dict.yolo_layer_0.anchors,
-        config.num_classes,
-    )
-    losses += yolo_loss(
-        results[1],
-        target,
-        net.detector.module_dict.yolo_layer_1.anchors,
-        config.num_classes,
-    )
-    losses += yolo_loss(
-        results[2],
-        target,
-        net.detector.module_dict.yolo_layer_2.anchors,
-        config.num_classes,
-    )
+    loss, result, loss_dict = net(img, target)
+    # yolo_loss = YOLOLoss()
+    # losses = 0
+    # losses += yolo_loss(
+    #     results[0],
+    #     target,
+    #     net.detector.module_dict.yolo_layer_0.anchors,
+    #     config.num_classes,
+    # )
+    # losses += yolo_loss(
+    #     results[1],
+    #     target,
+    #     net.detector.module_dict.yolo_layer_1.anchors,
+    #     config.num_classes,
+    # )
+    # losses += yolo_loss(
+    #     results[2],
+    #     target,
+    #     net.detector.module_dict.yolo_layer_2.anchors,
+    #     config.num_classes,
+    # )
 
-    losses.backward()
+    loss.backward()
     optimizer.step()
     optimizer.zero_grad()
 
-    yolo_loss.loss_dict["epoch"] = engine.state.epoch
-    return dict(sorted(yolo_loss.loss_dict.items()))
+    loss_dict["epoch"] = engine.state.epoch
+    return dict(sorted(loss_dict.items()))
 
 
 @torch.no_grad()
@@ -161,10 +162,6 @@ def evaluate_fn(
     img = batch[0].to(config.device, non_blocking=True)
     target = batch[1].to(config.device, non_blocking=True)
     preds = net(img)
-    preds = torch.cat(preds, dim=1)
-    print("Preds is finite - ", torch.isfinite(preds).all())
-    print("Preds is nan - ", torch.isnan(preds).any())
-    print("Preds is inf - ", torch.isinf(preds).any())
     # conf_mask = preds[..., 4:5] >= config.conf_threshold
     # preds = preds * conf_mask
     # preds[..., :4] = box_convert(preds[..., :4] * config.img_size, "cxcywh", "xyxy")
@@ -232,7 +229,7 @@ def main(local_rank: int, config: Namespace):
     # -----------------------
     # model and optimizer
     # -----------------------
-    net = idist.auto_model(YOLOv3(config.img_size, config.num_classes))
+    net = idist.auto_model(YOLOv3(config.name))
     optimizer = idist.auto_optim(optim.Adam(net.parameters(), lr=config.lr))
 
     # ---------------
@@ -259,6 +256,11 @@ def main(local_rank: int, config: Namespace):
         engine_train.add_event_handler(
             Events.STARTED, sanity_check, engine_eval, dataloader_eval, config
         )
+
+    # -------------------
+    # terminate on nan
+    # -------------------
+    engine_eval.add_event_handler(Events.ITERATION_COMPLETED, TerminateOnNan())
 
     # -------------------
     # add wandb logger
@@ -331,7 +333,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--img_size", default=416, type=int, help="image size (416)")
     parser.add_argument(
-        "--num_classes", default=20, type=int, help="number of classes (20)"
+        "--name", default="yolov3_voc", type=str, help="model name (yolov3_voc)"
     )
     parser.add_argument(
         "--conf_threshold", default=0.5, type=float, help="confidence threshold (0.5)"

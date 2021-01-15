@@ -2,6 +2,46 @@
 
 import torch
 from torch import Tensor
+from typing import Optional
+
+
+def parse_config(name: str):
+    """Parse YOLOv3 config from given name.
+
+    Args:
+        name (str): name of YOLOv3 config. [yolov3, yolov3_voc, yolov3_tiny, yolov3_spp]
+
+    Returns:
+        list[dict]: configs
+    """
+    if name == "yolov3":
+        from toydet.yolo_v3 import YOLOV3 as CONFIG
+    elif name == "yolov3_voc":
+        from toydet.yolo_v3 import YOLOV3_VOC as CONFIG
+    elif name == "yolov3_tiny":
+        from toydet.yolo_v3 import YOLOV3_TINY as CONFIG
+    elif name == "yolov3_spp":
+        from toydet.yolo_v3 import YOLOV3_SPP as CONFIG
+    else:
+        raise ValueError(
+            f"{name} is undefined. Choose between"
+            " (yolov3, yolov3_voc, yolov3_tiny, yolov3_spp)"
+        )
+
+    lines = CONFIG.split("\n")
+    lines = [line.strip() for line in lines if line and not line.startswith("#")]
+    configs = []
+    for line in lines:
+        if line.startswith("["):
+            configs.append({})
+            configs[-1]["type"] = line.strip("[]")
+            if configs[-1]["type"] == "convolutional":
+                configs[-1]["batch_normalize"] = 0
+        else:
+            key, value = line.split("=")
+            configs[-1][key.strip()] = value.strip()
+
+    return configs
 
 
 def box_iou_wh(wh1, wh2):
