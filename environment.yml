@@ -1,0 +1,22 @@
+# conda / mamba env update -f environment.yml
+
+name: detection
+
+channels:
+  - pytorch
+  - conda-forge
+
+dependencies:
+  - python=3.8
+  - cpuonly
+  - pip
+  - numpy
+  - pytorch
+  - torchvision
+  - ignite
+  - albumentations
+
+  - pip:
+      - prettytable
+      - coverage
+      - parameterized
