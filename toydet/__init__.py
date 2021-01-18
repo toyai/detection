@@ -111,6 +111,11 @@ DEFAULTS = {
         "action": "store_true",
         "help": "to use wandb or not",
     },
+    "val_batch_size": {
+        "default": 4,
+        "type": int,
+        "help": "will be equally divided by number of GPUs if in distributed (4)",
+    },
     "verbose": {
         "action": "store_true",
         "help": "Use logging.INFO",

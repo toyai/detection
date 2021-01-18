@@ -171,7 +171,7 @@ def get_dataloaders(
     )
     dataloader_eval = idist.auto_dataloader(
         dataset_eval,
-        batch_size=config.batch_size,
+        batch_size=config.val_batch_size,
         shuffle=False,
         num_workers=config.j,
         collate_fn=getattr(dataset_eval, "collate_fn", None),
@@ -194,7 +194,7 @@ def setup_logging(optimizer: Optimizer, config: Namespace) -> Tuple[Logger, str]
     now = datetime.now().strftime("%Y%m%d-%X")
     logger_ = setup_logger(
         level=logging.INFO if config.verbose else logging.WARNING,
-        format="%(levelname)s: %(message)s",
+        format="%(message)s",
         filepath=config.filepath / f"{name}-{now}.log",
     )
 
