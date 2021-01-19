@@ -64,7 +64,9 @@ def train_fn(
     optimizer.zero_grad()
 
     loss_dict["epoch"] = engine.state.epoch
-    return dict(sorted(loss_dict.items()))
+    loss_dict = dict(sorted(loss_dict.items()))
+    engine.state.metrics = loss_dict
+    return loss_dict
 
 
 @torch.no_grad()
@@ -81,7 +83,6 @@ def evaluate_fn(
     all_boxes, all_labels, all_scores = postprocess_predictions(preds, config)
 
     for i, (boxes, scores, labels) in enumerate(zip(all_boxes, all_scores, all_labels)):
-        print(boxes)
         img_to_draw = img[i]
         boxes = boxes.tolist()
         scores = scores.tolist()

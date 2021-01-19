@@ -33,7 +33,7 @@ DEFAULTS = {
         "help": "will be equally divided by number of GPUs if in distributed (2)",
     },
     "data_path": {
-        "default": "./datasets",
+        "default": ".",
         "type": str,
         "help": "datasets path (.)",
     },

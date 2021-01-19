@@ -79,7 +79,7 @@ def cuda_info(device: torch.device) -> None:
             "CUDA_VISIBLE_DEVICES", ",".join([str(i) for i in range(devices)])
         )
         prop = torch.cuda.get_device_properties(device=device)
-        logger.info("CUDA_VISIBLE_DEVICES - %s\n\t%s - %s", devices, prop, device)
+        logger.info("CUDA_VISIBLE_DEVICES - %s\n%s - %s", devices, prop, device)
 
 
 def mem_info(device: torch.device) -> None:
@@ -90,11 +90,12 @@ def mem_info(device: torch.device) -> None:
     """
     if "cuda" in device.type:
         mega_byte = 1024.0 * 1024.0
-        memformat = """
-        Memory allocated %.6f MB
-        Max Memory allocated %.6f MB
-        Memory reserved %.6f MB
-        Max Memory reserved %.6f MB"""
+        memformat = (
+            "Memory allocated %.6f MB\n"
+            + "Max Memory allocated %.6f MB\n"
+            + "Memory reserved %.6f MB\n"
+            + "Max Memory reserved %.6f MB"
+        )
 
         logger.info(
             memformat,
@@ -131,7 +132,7 @@ def sanity_check(engine: Engine, dataloader: Iterable, config: Namespace) -> Non
 
 
 def log_metrics(engine: Engine, tag: str, device: torch.device) -> None:
-    """Log ``engine.state.output`` and ``engine.state.metrics`` with given ``engine``
+    """Log ``engine.state.metrics`` with given ``engine``
     and memory info with given ``device``.
 
     Args:
@@ -140,7 +141,6 @@ def log_metrics(engine: Engine, tag: str, device: torch.device) -> None:
         device (torch.device): current torch.device to log memory info.
     """
     metrics_format = f"""{tag} Epoch {engine.state.epoch} - Iteration {engine.state.iteration}
-    Output: {engine.state.output}
     Metrics: {engine.state.metrics}"""
     logger.info(metrics_format)
     mem_info(device)
