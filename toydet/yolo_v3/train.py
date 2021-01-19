@@ -1,4 +1,5 @@
 from argparse import ArgumentParser, Namespace
+from datetime import datetime
 from pathlib import Path
 from pprint import pformat
 from typing import Sequence
@@ -24,11 +25,12 @@ from toydet.utils import (
     log_metrics,
     params_info,
     sanity_check,
+    draw_bounding_boxes,
     setup_logging,
 )
-from toydet.datasets import VOCDetection_
+from toydet.datasets.voc import VOCDetection_, VOC_CLASSES
 from toydet.yolo_v3.models import YOLOv3
-from toydet.yolo_v3.utils import non_max_suppression
+from toydet.yolo_v3.utils import postprocess_predictions
 
 
 torch.autograd.set_detect_anomaly(True)
@@ -76,9 +78,20 @@ def evaluate_fn(
     img = batch[0].to(config.device, non_blocking=True)
     target = batch[1].to(config.device, non_blocking=True)
     preds = net(img)
-    preds = non_max_suppression(preds, config.conf_threshold, config.nms_threshold)
-    print(preds[0].shape)
-    exit(1)
+    all_boxes, all_labels, all_scores = postprocess_predictions(preds, config)
+
+    for i, (boxes, scores, labels) in enumerate(zip(all_boxes, all_scores, all_labels)):
+        print(boxes)
+        img_to_draw = img[i]
+        boxes = boxes.tolist()
+        scores = scores.tolist()
+        labels = labels.tolist()
+        scores_labels = [
+            f"{VOC_CLASSES[label]} {score:.6f}" for label, score in zip(labels, scores)
+        ]
+        img_to_draw = draw_bounding_boxes(img_to_draw, boxes, scores_labels)
+        fname = datetime.now().strftime("%Y%m%d-%X") + ".png"
+        img_to_draw.save(config.filepath / fname, format="png")
     return preds
 
 
@@ -223,6 +236,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--nms_threshold", default=0.5, type=float, help="nms threshold (0.5)"
+    )
+    parser.add_argument(
+        "--detections_per_img", default=100, type=int, help="detections per image (100)"
     )
     opt = parser.parse_args()
     manual_seed(opt.seed)

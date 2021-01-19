@@ -2,7 +2,7 @@
 
 import torch
 from torch import Tensor
-from torchvision.ops import nms, box_convert
+from torchvision import ops as box_ops
 from typing import List
 
 
@@ -64,18 +64,34 @@ def box_iou_wh(wh1: Tensor, wh2: Tensor) -> Tensor:
     return inter_area / union_area
 
 
-def non_max_suppression(preds, conf_threshold, nms_threshold):
-    preds[..., :4] = box_convert(preds[..., :4], "cxcywh", "xyxy")
-    output = [None for _ in range(len(preds))]
-    for i, pred in enumerate(preds):
-        pred = pred[pred[:, 4] > conf_threshold]
-        if not pred.size(0):
-            continue
-        score = pred[:, 4] * pred[:, 5:].max(1)[0]
-        pred = pred[(-score).argsort()]
-        class_conf, class_idx = pred[:, 5:].max(1, keepdim=True)
-        pred = torch.cat((pred[:, :5], class_conf, class_idx), dim=-1)
-        keep = nms(pred[:, :4], score, nms_threshold)
-        # if keep is not None:
-        output[i] = pred[keep]
-    return output
+def postprocess_predictions(preds, config):
+    # convert cxcywh to xyxy
+    preds[..., :4] = box_ops.box_convert(preds[..., :4], "cxcywh", "xyxy")
+    pred_boxes_list, pred_scores_list, pred_cls_list = preds.split(
+        (4, 1, config.num_classes), dim=-1
+    )
+    all_boxes = []
+    all_labels = []
+    all_scores = []
+
+    for boxes, scores, labels in zip(pred_boxes_list, pred_scores_list, pred_cls_list):
+        boxes = box_ops.clip_boxes_to_image(boxes, (config.img_size, config.img_size))
+        scores = scores.reshape(-1)
+
+        # remove low scoring boxes
+        inds = torch.where(scores > config.conf_threshold)[0]
+        boxes, scores, labels = boxes[inds], scores[inds], labels[inds]
+
+        keep = box_ops.remove_small_boxes(boxes, min_size=1e-2)
+        boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
+
+        labels = labels.max(-1)[-1]
+        keep = box_ops.batched_nms(boxes, scores, labels, config.nms_threshold)
+        keep = keep[: config.detections_per_img]
+        boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
+
+        all_boxes.append(boxes)
+        all_labels.append(labels)
+        all_scores.append(scores)
+
+    return all_boxes, all_labels, all_scores
