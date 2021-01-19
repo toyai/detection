@@ -90,12 +90,11 @@ def mem_info(device: torch.device) -> None:
     """
     if "cuda" in device.type:
         mega_byte = 1024.0 * 1024.0
-        memformat = (
-            "Memory allocated %.6f MB\n"
-            + "Max Memory allocated %.6f MB\n"
-            + "Memory reserved %.6f MB\n"
-            + "Max Memory reserved %.6f MB"
-        )
+        memformat = """Memory
+        Memory allocated %.6f MB
+        Max Memory allocated %.6f MB
+        Memory reserved %.6f MB
+        Max Memory reserved %.6f MB"""
 
         logger.info(
             memformat,
