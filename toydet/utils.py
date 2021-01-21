@@ -130,7 +130,7 @@ def log_metrics(engine: Engine, tag: str, device: torch.device) -> None:
     if "cuda" in device.type:
         logger.info(
             "Memory allocated %.2f MB",
-            torch.cuda.max_memory_allocated(device) / 1024.0 * 1024.0,
+            torch.cuda.max_memory_allocated(device) / (1024.0 * 1024.0),
         )
 
 
