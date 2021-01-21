@@ -196,7 +196,6 @@ def main(local_rank: int, config: Namespace):
         n_saved=2,
         score_function=lambda engine: engine.state.metrics["precision"],
         score_name="precision",
-        filename_prefix="best",
         global_step_transform=global_step_from_engine(engine_train),
         output_path=config.filepath,
         stop_on_nan=False,
