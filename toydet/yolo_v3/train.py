@@ -185,10 +185,10 @@ def main(local_rank: int, config: Namespace):
     # add common training handlers
     # --------------------------------
     to_save = {
-        "model": net.state_dict(),
-        "optimizer": optimizer.state_dict(),
-        "engine_train": engine_train.state_dict(),
-        "engine_eval": engine_eval.state_dict(),
+        "model": net,
+        "optimizer": optimizer,
+        "engine_train": engine_train,
+        "engine_eval": engine_eval,
     }
     common.setup_common_training_handlers(
         engine_eval,
