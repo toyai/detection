@@ -139,8 +139,13 @@ def log_metrics(engine: Engine, tag: str, device: torch.device) -> None:
         tag (str): a string to add at the start of output.
         device (torch.device): current torch.device to log memory info.
     """
-    metrics_format = f"""{tag} Epoch {engine.state.epoch} - Iteration {engine.state.iteration}
-    Metrics: {engine.state.metrics}"""
+    max_epochs = len(str(engine.state.max_epochs))
+    max_iters = len(str(engine.state.max_iters))
+    metrics_format = (
+        f"{tag} Epoch [{engine.state.epoch:>{max_epochs}}"
+        f" : {engine.state.iteration:>{max_iters}}]"
+        f" - Metrics: {engine.state.metrics}"
+    )
     logger.info(metrics_format)
     mem_info(device)
 
