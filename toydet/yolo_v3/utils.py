@@ -81,17 +81,18 @@ def postprocess_predictions(preds, config):
         # remove low scoring boxes
         inds = torch.where(scores > config.conf_threshold)[0]
         boxes, scores, labels = boxes[inds], scores[inds], labels[inds]
+        if boxes.size(0) and scores.size(0) and labels.size(0):
+            keep = box_ops.remove_small_boxes(boxes, min_size=1e-2)
+            boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
 
-        keep = box_ops.remove_small_boxes(boxes, min_size=1e-2)
-        boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
+            class_prob, labels = labels.max(-1)
+            scores *= class_prob
+            keep = box_ops.batched_nms(boxes, scores, labels, config.nms_threshold)
+            keep = keep[: config.detections_per_img]
+            boxes, scores, labels = (boxes[keep], scores[keep], labels[keep])
 
-        labels = labels.max(-1)[-1]
-        keep = box_ops.batched_nms(boxes, scores, labels, config.nms_threshold)
-        keep = keep[: config.detections_per_img]
-        boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
-
-        all_boxes.append(boxes)
-        all_labels.append(labels)
-        all_scores.append(scores)
+            all_boxes.append(boxes)
+            all_labels.append(labels)
+            all_scores.append(scores)
 
     return all_boxes, all_labels, all_scores

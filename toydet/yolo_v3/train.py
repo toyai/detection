@@ -8,9 +8,10 @@ import ignite.distributed as idist
 import torch
 from ignite.engine import Engine, Events
 from ignite.contrib.engines import common
-from ignite.utils import manual_seed
+from ignite.metrics import Precision, Recall
+from ignite.utils import manual_seed, to_onehot
 from torch import Tensor, nn, optim
-from torchvision.ops import box_convert
+from torchvision.ops import box_convert, box_iou
 
 from toydet import get_default_parser
 from toydet.transforms import (
@@ -81,19 +82,31 @@ def evaluate_fn(
     target = batch[1].to(config.device, non_blocking=True)
     preds = net(img)
     all_boxes, all_labels, all_scores = postprocess_predictions(preds, config)
-
-    for i, (boxes, scores, labels) in enumerate(zip(all_boxes, all_scores, all_labels)):
-        img_to_draw = img[i]
-        boxes = boxes.tolist()
-        scores = scores.tolist()
-        labels = labels.tolist()
-        scores_labels = [
-            f"{VOC_CLASSES[label]} {score:.6f}" for label, score in zip(labels, scores)
-        ]
-        img_to_draw = draw_bounding_boxes(img_to_draw, boxes, scores_labels)
-        fname = datetime.now().strftime("%Y%m%d-%X") + ".png"
-        img_to_draw.save(config.filepath / fname, format="png")
-    return preds
+    # all_boxes = torch.stack(all_boxes, dim=0)
+    # all_labels = torch.stack(all_labels, dim=0)
+    # all_scores = torch.stack(all_scores, dim=0)
+    ious = []
+    for i, boxes in enumerate(all_boxes):
+        ious.append(box_iou(target[target[:, 0] == i][:, 2:], boxes))
+    ious = torch.cat(ious, dim=0)
+    max_ious, ious_idx = ious.max(1)
+    y_pred = torch.zeros_like(ious)
+    y = torch.ones_like(target[:, 1], dtype=torch.int64)
+    iou_gt = max_ious > config.iou_threshold
+    y_pred[torch.where(iou_gt)[0], ious_idx[iou_gt]] = 1.0
+    # for i, (boxes, scores, labels) in enumerate(zip(all_boxes, all_scores, all_labels)):
+    #     img_to_draw = img[i]
+    #     boxes = boxes.tolist()
+    #     scores = scores.tolist()
+    #     labels = labels.tolist()
+    #     scores_labels = [
+    #         f"[{score:.2f}] {VOC_CLASSES[label]}"
+    #         for label, score in zip(labels, scores)
+    #     ]
+    #     img_to_draw = draw_bounding_boxes(img_to_draw, boxes, scores_labels)
+    #     fname = datetime.now().strftime("%Y%m%d-%X") + ".png"
+    #     img_to_draw.save(config.filepath / fname, format="png")
+    return y_pred.to(torch.int64), y
 
 
 def main(local_rank: int, config: Namespace):
@@ -141,6 +154,12 @@ def main(local_rank: int, config: Namespace):
         lambda engine, batch: train_fn(engine, batch, net, optimizer, config)
     )
     engine_eval = Engine(lambda engine, batch: evaluate_fn(engine, batch, net, config))
+
+    # ----------
+    # metrics
+    # ----------
+    Precision(average=True, device=config.device).attach(engine_eval, "precision")
+    Recall(average=True, device=config.device).attach(engine_eval, "recall")
 
     # ---------------
     # sanity check
@@ -233,10 +252,13 @@ if __name__ == "__main__":
         "--name", default="yolov3_voc", type=str, help="model name (yolov3_voc)"
     )
     parser.add_argument(
-        "--conf_threshold", default=0.5, type=float, help="confidence threshold (0.5)"
+        "--conf_threshold", default=0.25, type=float, help="confidence threshold (0.25)"
     )
     parser.add_argument(
-        "--nms_threshold", default=0.5, type=float, help="nms threshold (0.5)"
+        "--nms_threshold", default=0.7, type=float, help="nms threshold (0.7)"
+    )
+    parser.add_argument(
+        "--iou_threshold", default=0.5, type=float, help="nms threshold (0.5)"
     )
     parser.add_argument(
         "--detections_per_img", default=100, type=int, help="detections per image (100)"
