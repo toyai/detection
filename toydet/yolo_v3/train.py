@@ -8,6 +8,7 @@ import ignite.distributed as idist
 import torch
 from ignite.engine import Engine, Events
 from ignite.contrib.engines import common
+from ignite.handlers import global_step_from_engine
 from ignite.metrics import Precision, Recall
 from ignite.utils import manual_seed, to_onehot
 from torch import Tensor, nn, optim
@@ -179,6 +180,31 @@ def main(local_rank: int, config: Namespace):
             config=config,
             project="yolov3",
         )
+
+    # --------------------------------
+    # add common training handlers
+    # --------------------------------
+    to_save = {
+        "model": net.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "engine_train": engine_train.state_dict(),
+        "engine_eval": engine_eval.state_dict(),
+    }
+    common.setup_common_training_handlers(
+        engine_eval,
+        to_save=to_save,
+        n_saved=2,
+        score_function=lambda engine: engine.state.metrics["precision"],
+        score_name="precision",
+        filename_prefix="best",
+        global_step_transform=global_step_from_engine(engine_train),
+        output_path=config.filepath,
+        stop_on_nan=False,
+        with_gpu_stats=False,
+        with_pbars=False,
+        with_pbar_on_iters=False,
+        clear_cuda_cache=False,
+    )
 
     # ----------------
     # log metrics

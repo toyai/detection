@@ -126,12 +126,11 @@ def log_metrics(engine: Engine, tag: str, device: torch.device) -> None:
         max_iters,
         engine.state.metrics,
     )
-    logger.info(metrics_format)
     if "cuda" in device.type:
-        logger.info(
-            "Memory allocated %.2f MB",
-            torch.cuda.max_memory_allocated(device) / (1024.0 * 1024.0),
+        metrics_format += " Memory - {:.2f} MB".format(
+            torch.cuda.max_memory_allocated(device) / (1024.0 * 1024.0)
         )
+    logger.info(metrics_format)
 
 
 def get_dataloaders(
