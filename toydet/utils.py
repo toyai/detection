@@ -82,38 +82,15 @@ def cuda_info(device: torch.device) -> None:
         logger.info("CUDA_VISIBLE_DEVICES - %s\n%s - %s", devices, prop, device)
 
 
-def mem_info(device: torch.device) -> None:
-    """Log PyTorch Memory Consumption at given ``device``.
+def params_info(module: Module) -> None:
+    """Log Parameters and Gradients of given ``module``.
 
     Args:
-        device (torch.device): current torch.device.
+        module (Module): model which to get parameters and gradients.
     """
-    if "cuda" in device.type:
-        mega_byte = 1024.0 * 1024.0
-        memformat = """Memory
-        Memory allocated %.6f MB
-        Max Memory allocated %.6f MB
-        Memory reserved %.6f MB
-        Max Memory reserved %.6f MB"""
-
-        logger.info(
-            memformat,
-            torch.cuda.memory_allocated(device) / mega_byte,
-            torch.cuda.max_memory_allocated(device) / mega_byte,
-            torch.cuda.memory_reserved(device) / mega_byte,
-            torch.cuda.max_memory_reserved(device) / mega_byte,
-        )
-
-
-def params_info(net: Module) -> None:
-    """Log Parameters and Gradients of given ``net``.
-
-    Args:
-        net (Module): model which to get parameters and gradients.
-    """
-    params = sum(p.numel() for p in net.parameters())
-    gradients = sum(p.numel() for p in net.parameters() if p.requires_grad)
-    logger.info("Parameters %g - Gradients %g", params, gradients)
+    params = sum(p.numel() for p in module.parameters())
+    gradients = sum(p.numel() for p in module.parameters() if p.requires_grad)
+    logger.info("Parameters: %g - Gradients: %g", params, gradients)
 
 
 def sanity_check(engine: Engine, dataloader: Iterable, config: Namespace) -> None:
@@ -126,7 +103,7 @@ def sanity_check(engine: Engine, dataloader: Iterable, config: Namespace) -> Non
     """
     logger.info("Sanity checking with %i iterations.", config.sanity_check)
     engine.run(dataloader, max_epochs=1, epoch_length=config.sanity_check)
-    # set to None to use `epoch_length`
+    # set to None to use `epoch_length` later
     engine.state.max_epochs = None
 
 
@@ -141,13 +118,20 @@ def log_metrics(engine: Engine, tag: str, device: torch.device) -> None:
     """
     max_epochs = len(str(engine.state.max_epochs))
     max_iters = len(str(engine.state.max_iters))
-    metrics_format = (
-        f"{tag} Epoch [{engine.state.epoch:>{max_epochs}}"
-        f" : {engine.state.iteration:>{max_iters}}]"
-        f" - Metrics: {engine.state.metrics}"
+    metrics_format = "{0} [{1:>{2}}/{3:0{4}d}]: {5}".format(
+        tag,
+        engine.state.epoch,
+        max_epochs,
+        engine.state.iteration,
+        max_iters,
+        engine.state.metrics,
     )
     logger.info(metrics_format)
-    mem_info(device)
+    if "cuda" in device.type:
+        logger.info(
+            "Memory allocated %.2f MB",
+            torch.cuda.max_memory_allocated(device) / 1024.0 * 1024.0,
+        )
 
 
 def get_dataloaders(
@@ -203,47 +187,3 @@ def setup_logging(optimizer: Optimizer, config: Namespace) -> Tuple[Logger, str]
     )
 
     return logger_, name
-
-
-def get_wandb_logger(
-    config: Namespace,
-    name: str,
-    engine_train: Engine,
-    engine_eval: Engine,
-    log_train_events: Any,
-    log_eval_events: Any,
-) -> WandBLogger:
-    """Setup ``WandBLogger`` from ignite.
-
-    Args:
-        config (Namespace): config namespace object.
-        name (str): ``name`` keyword argument of ``WandBLogger``
-        engine_train (Engine): engine for training.
-        engine_eval (Engine): engine for evaluating.
-        log_train_events (Any): Events of training to log.
-        log_eval_events (Any): Events of evaluation to log.
-
-    Returns:
-        WandBLogger: instance of ``WandBLogger``
-    """
-    wb_logger = WandBLogger(
-        config=config,
-        name=name,
-        project="yolov3",
-        reinit=True,
-    )
-    wb_logger.attach_output_handler(
-        engine_train,
-        log_train_events,
-        tag="train",
-        output_transform=lambda output: output,
-    )
-    wb_logger.attach_output_handler(
-        engine_eval,
-        log_eval_events,
-        tag="eval",
-        metric_names="all",
-        global_step_transform=lambda *_: engine_train.state.iteration,
-    )
-
-    return wb_logger

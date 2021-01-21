@@ -33,9 +33,6 @@ from toydet.datasets.voc import VOCDetection_, VOC_CLASSES
 from toydet.yolo_v3.models import YOLOv3
 from toydet.yolo_v3.utils import postprocess_predictions
 
-
-torch.autograd.set_detect_anomaly(True)
-
 transforms_train = SequentialWithDict(
     {
         "LetterBox": LetterBox(416),
@@ -255,7 +252,7 @@ if __name__ == "__main__":
         "--conf_threshold", default=0.25, type=float, help="confidence threshold (0.25)"
     )
     parser.add_argument(
-        "--nms_threshold", default=0.7, type=float, help="nms threshold (0.7)"
+        "--nms_threshold", default=0.5, type=float, help="nms threshold (0.5)"
     )
     parser.add_argument(
         "--iou_threshold", default=0.5, type=float, help="nms threshold (0.5)"
