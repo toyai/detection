@@ -112,11 +112,12 @@ def main(local_rank: int, config: Namespace):
         lambda _, event: event % config.log_train == 0 or event == 1
     )
 
-    # -----------------------
-    # model and optimizer
-    # -----------------------
+    # ------------------------------------
+    # model, optimizer and lr_scheduler
+    # ------------------------------------
     net = idist.auto_model(YOLOv3(config.name))
     optimizer = idist.auto_optim(optim.Adam(net.parameters(), lr=config.lr))
+    lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, config.log_train)
 
     # ---------------
     # setup logging
@@ -162,12 +163,14 @@ def main(local_rank: int, config: Namespace):
     to_save = {
         "model": net,
         "optimizer": optimizer,
+        "lr_scheduler": lr_scheduler,
         "engine_train": engine_train,
         "engine_eval": engine_eval,
     }
     common.setup_common_training_handlers(
         engine_train,
         to_save=to_save,
+        lr_scheduler=lr_scheduler,
         save_every_iters=config.log_train,
         output_path=config.filepath,
         n_saved=2,
