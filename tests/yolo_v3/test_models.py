@@ -4,20 +4,20 @@ from collections import OrderedDict
 from unittest import TestCase, main
 
 import torch
-from torch import nn, Tensor
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from torch import Tensor, nn
 
 from toydet.yolo_v3.models import (
     ANCHORS,
     ConvBN,
-    _make_residual_layers,
-    six_convbn,
-    ResidualBlock,
-    Extractor,
     Detector,
+    Extractor,
+    ResidualBlock,
     YOLOLayer,
     YOLOv3,
+    _make_residual_layers,
+    six_convbn,
 )
 
 

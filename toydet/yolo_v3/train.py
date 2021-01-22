@@ -6,15 +6,14 @@ from typing import Sequence
 
 import ignite.distributed as idist
 import torch
-from ignite.engine import Engine, Events
 from ignite.contrib.engines import common
-from ignite.handlers import global_step_from_engine
-from ignite.metrics import Precision, Recall
-from ignite.utils import manual_seed, to_onehot
+from ignite.engine import Engine, Events
+from ignite.utils import manual_seed
 from torch import Tensor, nn, optim
-from torchvision.ops import box_convert, box_iou
+from torchvision.ops import box_convert
 
 from toydet import get_default_parser
+from toydet.datasets.voc import VOC_CLASSES, VOCDetection_
 from toydet.transforms import (
     LetterBox,
     RandomHorizontalFlipWithBBox,
@@ -23,14 +22,13 @@ from toydet.transforms import (
 )
 from toydet.utils import (
     cuda_info,
+    draw_bounding_boxes,
     get_dataloaders,
     log_metrics,
     params_info,
     sanity_check,
-    draw_bounding_boxes,
     setup_logging,
 )
-from toydet.datasets.voc import VOCDetection_, VOC_CLASSES
 from toydet.yolo_v3.models import YOLOv3
 from toydet.yolo_v3.utils import postprocess_predictions
 

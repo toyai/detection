@@ -1,9 +1,10 @@
 """Common utilites to YOLO v3."""
 
+from typing import List
+
 import torch
 from torch import Tensor
 from torchvision import ops as box_ops
-from typing import List
 
 
 def parse_config(name: str) -> List[dict]:

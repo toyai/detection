@@ -1,10 +1,12 @@
 """YOLO v3 Models."""
 
-import torch
-from torch import nn, Tensor
-from torch.nn import functional as F
 from typing import List
-from toydet.yolo_v3.utils import parse_config, box_iou_wh
+
+import torch
+from torch import Tensor, nn
+from torch.nn import functional as F
+
+from toydet.yolo_v3.utils import box_iou_wh, parse_config
 
 
 def create_modules(configs: List[dict]):
