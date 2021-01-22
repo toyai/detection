@@ -88,10 +88,11 @@ def evaluate_fn(
         ious.append(box_iou(target[target[:, 0] == i][:, 2:], boxes))
     ious = torch.cat(ious, dim=0)
     max_ious, ious_idx = ious.max(1)
-    y_pred = torch.zeros_like(ious)
+    # y_pred = torch.zeros_like(ious)
     y = torch.ones_like(target[:, 1], dtype=torch.int64)
-    iou_gt = max_ious > config.iou_threshold
-    y_pred[torch.where(iou_gt)[0], ious_idx[iou_gt]] = 1.0
+    # iou_gt = max_ious > config.iou_threshold
+    # y_pred[torch.where(iou_gt)[0], ious_idx[iou_gt]] = 1.0
+    y_pred = torch.where(ious.max(1)[0] > config.iou_threshold, 1.0, 0.0)
     # for i, (boxes, scores, labels) in enumerate(zip(all_boxes, all_scores, all_labels)):
     #     img_to_draw = img[i]
     #     boxes = boxes.tolist()
@@ -181,24 +182,27 @@ def main(local_rank: int, config: Namespace):
             project="yolov3",
         )
 
-    # --------------------------------
-    # add common training handlers
-    # --------------------------------
+    # ------------------------------------
+    # add common training /eval handlers
+    # ------------------------------------
     to_save = {
         "model": net,
         "optimizer": optimizer,
         "engine_train": engine_train,
         "engine_eval": engine_eval,
     }
-    common.setup_common_training_handlers(
-        engine_eval,
-        to_save=to_save,
-        n_saved=2,
-        score_function=lambda engine: engine.state.metrics["precision"],
-        score_name="precision",
-        global_step_transform=global_step_from_engine(engine_train),
+    ckpt_handler = common.save_best_model_by_val_score(
         output_path=config.filepath,
-        stop_on_nan=False,
+        evaluator=engine_eval,
+        model=to_save,
+        metric_name="precision",
+        n_saved=2,
+        trainer=engine_train,
+        tag="eval",
+    )
+    logger.info("Last checkpoint: %s", ckpt_handler.last_checkpoint)
+    common.setup_common_training_handlers(
+        engine_train,
         with_gpu_stats=False,
         with_pbars=False,
         with_pbar_on_iters=False,

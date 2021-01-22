@@ -5,12 +5,11 @@ from argparse import Namespace
 from datetime import datetime
 from logging import Logger
 from random import randint
-from typing import Any, Iterable, Optional, Sequence, Tuple, Union
+from typing import Iterable, Optional, Sequence, Tuple, Union
 
 import ignite.distributed as idist
 import numpy as np
 import torch
-from ignite.contrib.handlers import WandBLogger
 from ignite.engine import Engine
 from ignite.utils import setup_logger
 from PIL import Image, ImageDraw, ImageFont
@@ -47,13 +46,8 @@ def draw_bounding_boxes(
     draw = ImageDraw.Draw(image)
     font = ImageFont.load_default()
 
-    if colors is None:
-        colors = [
-            (randint(0, 200), randint(0, 200), randint(0, 200))
-            for _ in range(len(boxes))
-        ]
     for i, box in enumerate(boxes):
-        color = colors[i]
+        color = (randint(0, 200), randint(0, 200), randint(0, 200))
         draw.rectangle(box, outline=color, width=width)
 
         if labels is not None:
@@ -90,7 +84,7 @@ def params_info(module: Module) -> None:
     """
     params = sum(p.numel() for p in module.parameters())
     gradients = sum(p.numel() for p in module.parameters() if p.requires_grad)
-    logger.info("Parameters: %g - Gradients: %g", params, gradients)
+    logger.info("Parameters: %g, Gradients: %g", params, gradients)
 
 
 def sanity_check(engine: Engine, dataloader: Iterable, config: Namespace) -> None:
@@ -181,7 +175,7 @@ def setup_logging(optimizer: Optimizer, config: Namespace) -> Tuple[Logger, str]
     now = datetime.now().strftime("%Y%m%d-%X")
     logger_ = setup_logger(
         level=logging.INFO if config.verbose else logging.WARNING,
-        format="%(message)s",
+        format="> %(message)s",
         filepath=config.filepath / f"{name}-{now}.log",
     )
 
