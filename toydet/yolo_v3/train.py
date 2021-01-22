@@ -151,7 +151,7 @@ def main(local_rank: int, config: Namespace):
         wb_logger = common.setup_wandb_logging(
             engine_train,
             optimizer,
-            config.log_train,
+            log_every_iters=config.log_train,
             name=name,
             config=config,
             project="yolov3",
