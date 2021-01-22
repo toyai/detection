@@ -159,7 +159,7 @@ def main(local_rank: int, config: Namespace):
         )
 
     # ------------------------------------
-    # add common training /eval handlers
+    # add common training handlers
     # ------------------------------------
     to_save = {
         "model": net,
@@ -170,14 +170,15 @@ def main(local_rank: int, config: Namespace):
     common.setup_common_training_handlers(
         engine_train,
         to_save=to_save,
+        save_every_iters=config.log_train,
         output_path=config.filepath,
         n_saved=2,
         score_name="total_loss",
         score_function=lambda engine: -engine.state.metrics["loss/total"],
-        with_gpu_stats=True,
-        with_pbars=True,
-        with_pbar_on_iters=True,
-        clear_cuda_cache=True,
+        with_gpu_stats=False,
+        with_pbars=False,
+        with_pbar_on_iters=False,
+        clear_cuda_cache=False,
     )
 
     # ----------------
