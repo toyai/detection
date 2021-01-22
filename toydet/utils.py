@@ -175,7 +175,7 @@ def setup_logging(optimizer: Optimizer, config: Namespace) -> Tuple[Logger, str]
     now = datetime.now().strftime("%Y%m%d-%X")
     logger_ = setup_logger(
         level=logging.INFO if config.verbose else logging.WARNING,
-        format="> %(message)s",
+        format="%(message)s",
         filepath=config.filepath / f"{name}-{now}.log",
     )
 
